@@ -253,7 +253,6 @@ export default function MessagesPage() {
 
             <ChatWindow
               conversation={selectedConversation}
-              onBack={() => setSelectedConvId(null)}
             />
           </div>
         ) : (
