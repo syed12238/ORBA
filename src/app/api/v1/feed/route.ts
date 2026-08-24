@@ -12,13 +12,14 @@ export async function GET(req: NextRequest) {
 
     if (filter === "bookmarks" as any) {
       if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required to view bookmarks", 401);
-      const bookmarks = FeedService.getBookmarkedPosts(userId);
-      return successResponse({ posts: bookmarks, hasMore: false });
+      const posts = await FeedService.getBookmarkedPosts(userId);
+      return successResponse({ posts, hasMore: false });
     }
 
-    const feedData = FeedService.getHomeFeed(userId, { filter, cursor, limit });
+    const feedData = await FeedService.getHomeFeed(userId, { filter, cursor, limit });
     return successResponse(feedData);
   } catch (err: any) {
+    console.error("Feed error:", err);
     return errorResponse("FEED_FETCH_ERROR", err.message || "Failed to load feed", 500);
   }
 }

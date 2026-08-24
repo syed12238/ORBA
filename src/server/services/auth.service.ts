@@ -1,11 +1,9 @@
-import bcrypt from "bcryptjs";
-import { db } from "../db";
-import { User, Profile, UserRole } from "@/types";
-import { backgroundQueue } from "../workers/queue";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { User, Profile } from "@/types";
 
 export class AuthService {
   /**
-   * Synchronizes or provisions a user record and profile for a Supabase-authenticated identity (e.g. Google OAuth).
+   * Synchronizes or provisions a user record and profile in Supabase PostgreSQL.
    */
   static async syncSupabaseUser(data: {
     supabaseId: string;
@@ -13,274 +11,237 @@ export class AuthService {
     displayName?: string;
     avatarUrl?: string;
   }): Promise<{ user: User; profile: Profile }> {
-    const state = db.getState();
     const cleanEmail = data.email.trim().toLowerCase();
     const now = new Date().toISOString();
 
-    // 1. Check if user already exists by Supabase ID
-    let existingUser = state.users.find(u => u.id === data.supabaseId);
-
-    // 2. Check if user already exists by verified email (Safe linking)
-    if (!existingUser) {
-      existingUser = state.users.find(u => u.email.toLowerCase() === cleanEmail);
-      if (existingUser) {
-        // Associate the Supabase ID to the existing record if needed
-        existingUser.updated_at = now;
-      }
-    }
+    // 1. Check if user exists in Supabase PostgreSQL
+    const { data: existingUser } = await supabaseAdmin
+      .from("users")
+      .select("*")
+      .eq("id", data.supabaseId)
+      .single();
 
     if (existingUser) {
-      let profile = state.profiles.find(p => p.user_id === existingUser!.id);
+      // User exists — fetch/ensure profile
+      const { data: existingProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("user_id", existingUser.id)
+        .single();
+
+      let profile = existingProfile;
+
       if (!profile) {
         // Create profile if missing
-        profile = {
+        const newProfile = {
           user_id: existingUser.id,
           display_name: data.displayName || existingUser.username,
-          avatar_url: data.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${existingUser.username}`,
-          banner_url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+          avatar_url:
+            data.avatarUrl ||
+            `https://api.dicebear.com/7.x/identicon/svg?seed=${existingUser.username}`,
+          banner_url:
+            "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
           bio: "Orbital pioneer on ORBA.",
           website: "",
           location: "",
           followers_count: 0,
           following_count: 0,
           posts_count: 0,
-          created_at: now,
-          updated_at: now,
         };
-        state.profiles.push(profile);
-      } else if (data.avatarUrl && (!profile.avatar_url || profile.avatar_url.includes("dicebear"))) {
-        // Safely set initial Google avatar if user hasn't uploaded a custom one
-        profile.avatar_url = data.avatarUrl;
-        profile.updated_at = now;
+        const { data: created } = await supabaseAdmin
+          .from("profiles")
+          .insert(newProfile)
+          .select()
+          .single();
+        profile = created;
+      } else if (
+        data.avatarUrl &&
+        (!profile.avatar_url || profile.avatar_url.includes("dicebear"))
+      ) {
+        await supabaseAdmin
+          .from("profiles")
+          .update({ avatar_url: data.avatarUrl, updated_at: now })
+          .eq("user_id", existingUser.id);
+        profile = { ...profile, avatar_url: data.avatarUrl };
       }
 
-      db.save();
-
-      return {
-        user: { ...existingUser, profile },
-        profile,
+      const user: User = {
+        id: existingUser.id,
+        email: existingUser.email,
+        username: existingUser.username,
+        role: existingUser.role,
+        is_verified: existingUser.is_verified,
+        is_private: existingUser.is_private,
+        is_suspended: existingUser.is_suspended,
+        created_at: existingUser.created_at,
+        updated_at: existingUser.updated_at,
       };
+
+      const profileOut: Profile = {
+        user_id: profile!.user_id,
+        display_name: profile!.display_name,
+        avatar_url: profile!.avatar_url,
+        banner_url: profile!.banner_url,
+        bio: profile!.bio,
+        website: profile!.website,
+        location: profile!.location,
+        followers_count: profile!.followers_count ?? 0,
+        following_count: profile!.following_count ?? 0,
+        posts_count: profile!.posts_count ?? 0,
+        created_at: profile!.created_at,
+        updated_at: profile!.updated_at,
+      };
+
+      return { user, profile: profileOut };
     }
 
-    // 3. First time Google login -> Provision new user and profile
-    // Generate clean base username
+    // 2. New user — generate username and create record
     let baseUsername = (data.displayName || cleanEmail.split("@")[0])
       .toLowerCase()
       .replace(/[^a-z0-9_]/g, "");
 
-    if (baseUsername.length < 3) {
-      baseUsername = `user_${baseUsername || "orbit"}`;
-    }
-    if (baseUsername.length > 25) {
-      baseUsername = baseUsername.slice(0, 25);
-    }
+    if (baseUsername.length < 3) baseUsername = `user_${baseUsername || "orbit"}`;
+    if (baseUsername.length > 25) baseUsername = baseUsername.slice(0, 25);
 
     // Ensure unique username
     let uniqueUsername = baseUsername;
     let counter = 1;
-    while (state.users.some(u => u.username.toLowerCase() === uniqueUsername.toLowerCase())) {
+    while (true) {
+      const { data: taken } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("username", uniqueUsername)
+        .single();
+      if (!taken) break;
       uniqueUsername = `${baseUsername}_${counter < 10 ? `0${counter}` : counter}`;
       counter++;
     }
 
-    const newUser: User = {
+    // Insert user
+    const newUserData = {
       id: data.supabaseId,
       email: cleanEmail,
       username: uniqueUsername,
+      password_hash: "",
       role: "USER",
-      is_verified: true, // OAuth email is verified by Google
+      is_verified: true,
       is_private: false,
       is_suspended: false,
-      created_at: now,
-      updated_at: now,
     };
 
-    const newProfile: Profile = {
+    const { data: createdUser, error: userErr } = await supabaseAdmin
+      .from("users")
+      .insert(newUserData)
+      .select()
+      .single();
+
+    if (userErr || !createdUser) {
+      throw new Error(`Failed to create user: ${userErr?.message}`);
+    }
+
+    // Insert profile
+    const newProfileData = {
       user_id: data.supabaseId,
       display_name: data.displayName || uniqueUsername,
-      avatar_url: data.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${uniqueUsername}`,
-      banner_url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
-      bio: "Joined ORBA via Google identity.",
+      avatar_url:
+        data.avatarUrl ||
+        `https://api.dicebear.com/7.x/identicon/svg?seed=${uniqueUsername}`,
+      banner_url:
+        "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+      bio: "Orbital pioneer on ORBA.",
       website: "",
       location: "",
       followers_count: 0,
       following_count: 0,
       posts_count: 0,
-      created_at: now,
-      updated_at: now,
     };
 
-    state.users.push(newUser);
-    state.profiles.push(newProfile);
-    state.user_settings.push({
-      user_id: data.supabaseId,
-      who_can_message: "EVERYONE",
-      who_can_mention: "EVERYONE",
-      email_notifications: true,
-      in_app_notifications: true,
-      theme: "DARK",
-    });
+    const { data: createdProfile, error: profileErr } = await supabaseAdmin
+      .from("profiles")
+      .insert(newProfileData)
+      .select()
+      .single();
 
-    db.save();
-
-    backgroundQueue.enqueue("AUDIT_LOG_RECORD", {
-      actorId: data.supabaseId,
-      action: "AUTH_GOOGLE_OAUTH",
-      resourceType: "USER",
-      resourceId: data.supabaseId,
-      metadata: { username: uniqueUsername, email: cleanEmail },
-    });
-
-    return {
-      user: { ...newUser, profile: newProfile },
-      profile: newProfile,
-    };
-  }
-
-  static async login(emailOrUsername: string, password?: string): Promise<{ user: User; profile: Profile }> {
-    const state = db.getState();
-    const clean = emailOrUsername.trim().toLowerCase();
-    
-    const user = state.users.find(
-      u => u.email.toLowerCase() === clean || u.username.toLowerCase() === clean
-    );
-
-    if (!user) {
-      throw new Error("Invalid credentials. Account not found.");
+    if (profileErr || !createdProfile) {
+      throw new Error(`Failed to create profile: ${profileErr?.message}`);
     }
 
-    if (user.is_suspended) {
-      throw new Error("Account has been suspended by administration.");
-    }
+    // Initialize user settings
+    await supabaseAdmin.from("user_settings").insert({ user_id: data.supabaseId }).select();
 
-    // In demo environment, allow direct login or password check
-    if (password && password !== "password123") {
-      const match = await bcrypt.compare(password, user.email === "hamza@orba.app" ? "$2a$10$..." : "");
-      // if mismatch, still allow demo fallback if password is valid
-    }
-
-    const profile = state.profiles.find(p => p.user_id === user.id);
-    if (!profile) {
-      throw new Error("Profile record missing.");
-    }
-
-    // Enqueue audit log
-    backgroundQueue.enqueue("AUDIT_LOG_RECORD", {
-      actorId: user.id,
-      action: "AUTH_LOGIN",
-      resourceType: "USER",
-      resourceId: user.id,
-      metadata: { username: user.username },
-    });
-
-    return {
-      user: { ...user, profile },
-      profile,
-    };
-  }
-
-  static async register(data: {
-    username: string;
-    email: string;
-    displayName: string;
-    password?: string;
-    avatarUrl?: string;
-    bio?: string;
-  }): Promise<{ user: User; profile: Profile }> {
-    const state = db.getState();
-    const cleanUsername = data.username.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
-    const cleanEmail = data.email.trim().toLowerCase();
-
-    if (cleanUsername.length < 3 || cleanUsername.length > 30) {
-      throw new Error("Username must be between 3 and 30 characters (letters, numbers, underscores).");
-    }
-
-    if (state.users.some(u => u.username.toLowerCase() === cleanUsername)) {
-      throw new Error(`Username @${cleanUsername} is already taken.`);
-    }
-
-    if (state.users.some(u => u.email.toLowerCase() === cleanEmail)) {
-      throw new Error(`Email ${cleanEmail} is already registered.`);
-    }
-
-    const userId = `u_${cleanUsername}_${Date.now()}`;
-    const now = new Date().toISOString();
-
-    const newUser: User = {
-      id: userId,
-      email: cleanEmail,
-      username: cleanUsername,
-      role: "USER",
-      is_verified: false,
-      is_private: false,
-      is_suspended: false,
-      created_at: now,
-      updated_at: now,
+    const user: User = {
+      id: createdUser.id,
+      email: createdUser.email,
+      username: createdUser.username,
+      role: createdUser.role,
+      is_verified: createdUser.is_verified,
+      is_private: createdUser.is_private,
+      is_suspended: createdUser.is_suspended,
+      created_at: createdUser.created_at,
+      updated_at: createdUser.updated_at,
     };
 
-    const newProfile: Profile = {
-      user_id: userId,
-      display_name: data.displayName || cleanUsername,
-      avatar_url: data.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanUsername}`,
-      banner_url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
-      bio: data.bio || "Joined the ORBA social orbit.",
-      website: "",
-      location: "",
+    const profile: Profile = {
+      user_id: createdProfile.user_id,
+      display_name: createdProfile.display_name,
+      avatar_url: createdProfile.avatar_url,
+      banner_url: createdProfile.banner_url,
+      bio: createdProfile.bio,
+      website: createdProfile.website,
+      location: createdProfile.location,
       followers_count: 0,
       following_count: 0,
       posts_count: 0,
-      created_at: now,
-      updated_at: now,
+      created_at: createdProfile.created_at,
+      updated_at: createdProfile.updated_at,
     };
 
-    state.users.push(newUser);
-    state.profiles.push(newProfile);
-    state.user_settings.push({
-      user_id: userId,
-      who_can_message: "EVERYONE",
-      who_can_mention: "EVERYONE",
-      email_notifications: true,
-      in_app_notifications: true,
-      theme: "DARK",
-    });
-
-    db.save();
-
-    backgroundQueue.enqueue("AUDIT_LOG_RECORD", {
-      actorId: userId,
-      action: "AUTH_REGISTER",
-      resourceType: "USER",
-      resourceId: userId,
-      metadata: { username: cleanUsername },
-    });
-
-    return {
-      user: { ...newUser, profile: newProfile },
-      profile: newProfile,
-    };
+    return { user, profile };
   }
 
-  static getDemoUsers() {
-    const state = db.getState();
-    return state.users.map(u => {
-      const p = state.profiles.find(pr => pr.user_id === u.id);
-      return {
-        id: u.id,
-        username: u.username,
-        display_name: p?.display_name || u.username,
-        avatar_url: p?.avatar_url || "",
-        role: u.role,
-        bio: p?.bio || "",
-      };
-    });
-  }
+  /**
+   * Get user + profile by Supabase user ID
+   */
+  static async getUserById(
+    userId: string
+  ): Promise<{ user: User; profile: Profile } | null> {
+    const { data: u } = await supabaseAdmin
+      .from("users")
+      .select("*, profiles(*)")
+      .eq("id", userId)
+      .single();
 
-  static getUserById(userId: string): { user: User; profile: Profile } | null {
-    const state = db.getState();
-    const user = state.users.find(u => u.id === userId);
-    if (!user) return null;
-    const profile = state.profiles.find(p => p.user_id === userId);
+    if (!u) return null;
+
+    const profile = Array.isArray(u.profiles) ? u.profiles[0] : u.profiles;
     if (!profile) return null;
-    return { user: { ...user, profile }, profile };
+
+    return {
+      user: {
+        id: u.id,
+        email: u.email,
+        username: u.username,
+        role: u.role,
+        is_verified: u.is_verified,
+        is_private: u.is_private,
+        is_suspended: u.is_suspended,
+        created_at: u.created_at,
+        updated_at: u.updated_at,
+      },
+      profile: {
+        user_id: profile.user_id,
+        display_name: profile.display_name,
+        avatar_url: profile.avatar_url,
+        banner_url: profile.banner_url,
+        bio: profile.bio,
+        website: profile.website,
+        location: profile.location,
+        followers_count: profile.followers_count ?? 0,
+        following_count: profile.following_count ?? 0,
+        posts_count: profile.posts_count ?? 0,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+      },
+    };
   }
 }

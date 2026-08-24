@@ -12,7 +12,7 @@ export async function GET(req: NextRequest, { params }: { params: { username: st
     const profile = UserService.getProfileByUsername(params.username);
     if (!profile) return errorResponse("USER_NOT_FOUND", "User not found", 404);
 
-    const signals = FeedService.getUserSignals(profile.user_id, currentUserId, tab);
+    const signals = await FeedService.getUserSignals(profile.user_id, currentUserId, tab);
     return successResponse({ signals });
   } catch (err: any) {
     return errorResponse("SIGNALS_FETCH_ERROR", err.message, 500);

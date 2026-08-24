@@ -1,187 +1,251 @@
-import { db } from "../db";
-import { Post, PaginatedFeedResponse } from "@/types";
-import { PostService } from "./post.service";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { Post } from "@/types";
 
 export type FeedFilter = "for_you" | "following" | "trending" | "media";
 
+interface FeedOptions {
+  filter?: FeedFilter;
+  cursor?: string;
+  limit?: number;
+}
+
+interface FeedResponse {
+  posts: Post[];
+  hasMore: boolean;
+  nextCursor?: string;
+}
+
+function mapPost(row: any, userId?: string): Post {
+  const authorProfile = Array.isArray(row.author_profile)
+    ? row.author_profile[0]
+    : row.author_profile;
+  const authorUser = Array.isArray(row.author_user)
+    ? row.author_user[0]
+    : row.author_user;
+
+  return {
+    id: row.id,
+    author_id: row.author_id,
+    circle_id: row.circle_id,
+    content: row.content,
+    visibility: row.visibility,
+    like_count: row.like_count ?? 0,
+    comment_count: row.comment_count ?? 0,
+    repost_count: row.repost_count ?? 0,
+    bookmark_count: row.bookmark_count ?? 0,
+    ranking_score: row.ranking_score ?? 0,
+    is_moderated: row.is_moderated ?? false,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    author: authorProfile
+      ? {
+          user_id: authorProfile.user_id,
+          display_name: authorProfile.display_name,
+          avatar_url: authorProfile.avatar_url,
+          banner_url: authorProfile.banner_url,
+          bio: authorProfile.bio,
+          website: authorProfile.website,
+          location: authorProfile.location,
+          followers_count: authorProfile.followers_count ?? 0,
+          following_count: authorProfile.following_count ?? 0,
+          posts_count: authorProfile.posts_count ?? 0,
+          created_at: authorProfile.created_at,
+          updated_at: authorProfile.updated_at,
+          username: authorUser?.username || "unknown",
+          is_verified: authorUser?.is_verified ?? false,
+          role: authorUser?.role || "USER",
+        }
+      : undefined,
+    media: row.media || [],
+    has_liked: userId ? (row.liked_by_user ?? false) : false,
+    has_reposted: userId ? (row.reposted_by_user ?? false) : false,
+    has_bookmarked: userId ? (row.bookmarked_by_user ?? false) : false,
+  };
+}
+
 export class FeedService {
-  static getHomeFeed(
+  static async getHomeFeed(
     currentUserId?: string,
-    options?: { filter?: FeedFilter; cursor?: string; limit?: number }
-  ): PaginatedFeedResponse {
-    const state = db.getState();
+    options?: FeedOptions
+  ): Promise<FeedResponse> {
     const filter = options?.filter || "for_you";
     const limit = options?.limit || 15;
-    const now = Date.now();
+    const cursor = options?.cursor;
 
-    // Determine user relationships
-    const followedUserIds = new Set(
-      currentUserId ? state.follows.filter(f => f.follower_id === currentUserId).map(f => f.following_id) : []
-    );
-    if (currentUserId) followedUserIds.add(currentUserId);
+    // Get followed user IDs if needed
+    let followedIds: string[] = [];
+    if (currentUserId && filter === "following") {
+      const { data: follows } = await supabaseAdmin
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", currentUserId);
+      followedIds = (follows || []).map((f: any) => f.following_id);
+      if (followedIds.length === 0) {
+        return { posts: [], hasMore: false };
+      }
+    }
 
-    const userCircleIds = new Set(
-      currentUserId ? state.circle_members.filter(cm => cm.user_id === currentUserId).map(cm => cm.circle_id) : []
-    );
+    // Build query
+    let query = supabaseAdmin
+      .from("posts")
+      .select(
+        `
+        *,
+        author_profile:profiles!posts_author_id_fkey(*),
+        author_user:users!posts_author_id_fkey(username, is_verified, role),
+        media(*)
+      `
+      )
+      .eq("is_moderated", false)
+      .eq("visibility", "PUBLIC");
 
-    let eligiblePosts = [...state.posts];
-
-    // Filter based on selected mode
-    if (filter === "following") {
-      eligiblePosts = eligiblePosts.filter(
-        p => followedUserIds.has(p.author_id) || (p.circle_id && userCircleIds.has(p.circle_id))
-      );
+    if (filter === "following" && followedIds.length > 0) {
+      query = query.in("author_id", followedIds);
     } else if (filter === "media") {
-      const mediaPostIds = new Set(state.media.map(m => m.post_id));
-      eligiblePosts = eligiblePosts.filter(p => mediaPostIds.has(p.id));
+      // Only posts with media — filter after fetch
+    } else if (filter === "trending") {
+      query = query.order("ranking_score", { ascending: false });
     }
 
-    // Calculate dynamic scored feed
-    const scoredPosts = eligiblePosts.map(post => {
-      const ageHours = Math.max(0.05, (now - new Date(post.created_at).getTime()) / (1000 * 60 * 60));
-      const recencyScore = 1000 / Math.pow(ageHours + 2, 1.25);
-      const engagementScore = post.like_count * 2.5 + post.comment_count * 3.5 + post.repost_count * 4.0;
-      
-      let relationshipScore = 0;
-      if (currentUserId) {
-        if (followedUserIds.has(post.author_id)) relationshipScore += 60;
-        if (post.circle_id && userCircleIds.has(post.circle_id)) relationshipScore += 40;
-        if (post.author_id === currentUserId) relationshipScore += 30;
-      }
-
-      const totalScore = filter === "following" 
-        ? new Date(post.created_at).getTime() // strictly chronological for following feed
-        : recencyScore + engagementScore + relationshipScore;
-
-      return {
-        post,
-        score: totalScore,
-      };
-    });
-
-    // Sort by calculated score descending
-    scoredPosts.sort((a, b) => b.score - a.score);
-
-    // Apply cursor-based pagination
-    let startIndex = 0;
-    if (options?.cursor) {
-      try {
-        const decoded = Buffer.from(options.cursor, "base64").toString("utf-8");
-        const foundIndex = scoredPosts.findIndex(sp => sp.post.id === decoded);
-        if (foundIndex !== -1) {
-          startIndex = foundIndex + 1;
-        }
-      } catch (e) {
-        startIndex = 0;
-      }
+    if (cursor) {
+      query = query.lt("created_at", cursor);
     }
 
-    const pageSlice = scoredPosts.slice(startIndex, startIndex + limit);
-    const enrichedPosts = pageSlice.map(sp => PostService.enrichPost(sp.post, currentUserId));
+    query = query.order("created_at", { ascending: false }).limit(limit + 1);
 
-    const nextPost = scoredPosts[startIndex + limit];
-    const nextCursor = nextPost ? Buffer.from(nextPost.post.id).toString("base64") : null;
-    const hasMore = startIndex + limit < scoredPosts.length;
+    const { data: rows, error } = await query;
 
-    return {
-      posts: enrichedPosts,
-      nextCursor,
-      hasMore,
-      totalCount: scoredPosts.length,
-    };
+    if (error) {
+      console.error("Feed query error:", error);
+      return { posts: [], hasMore: false };
+    }
+
+    let posts = (rows || []).map((r: any) => mapPost(r, currentUserId));
+
+    // Filter media posts after fetch
+    if (filter === "media") {
+      posts = posts.filter((p) => p.media && p.media.length > 0);
+    }
+
+    // Enrich with user-specific status (likes, bookmarks, reposts)
+    if (currentUserId && posts.length > 0) {
+      const postIds = posts.map((p) => p.id);
+
+      const [{ data: likes }, { data: reposts }, { data: bookmarks }] =
+        await Promise.all([
+          supabaseAdmin
+            .from("post_likes")
+            .select("post_id")
+            .eq("user_id", currentUserId)
+            .in("post_id", postIds),
+          supabaseAdmin
+            .from("reposts")
+            .select("post_id")
+            .eq("user_id", currentUserId)
+            .in("post_id", postIds),
+          supabaseAdmin
+            .from("bookmarks")
+            .select("post_id")
+            .eq("user_id", currentUserId)
+            .in("post_id", postIds),
+        ]);
+
+      const likedSet = new Set((likes || []).map((l: any) => l.post_id));
+      const repostedSet = new Set((reposts || []).map((r: any) => r.post_id));
+      const bookmarkedSet = new Set((bookmarks || []).map((b: any) => b.post_id));
+
+      posts = posts.map((p) => ({
+        ...p,
+        has_liked: likedSet.has(p.id),
+        has_reposted: repostedSet.has(p.id),
+        has_bookmarked: bookmarkedSet.has(p.id),
+      }));
+    }
+
+    const hasMore = posts.length > limit;
+    if (hasMore) posts.pop();
+
+    const nextCursor =
+      hasMore && posts.length > 0 ? posts[posts.length - 1].created_at : undefined;
+
+    return { posts, hasMore, nextCursor };
   }
 
-  static getUserSignals(
-    targetUserId: string,
+  static async getBookmarkedPosts(userId: string): Promise<Post[]> {
+    const { data: bookmarks } = await supabaseAdmin
+      .from("bookmarks")
+      .select(
+        `
+        post_id,
+        posts(
+          *,
+          author_profile:profiles!posts_author_id_fkey(*),
+          author_user:users!posts_author_id_fkey(username, is_verified, role),
+          media(*)
+        )
+      `
+      )
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (!bookmarks) return [];
+
+    return bookmarks
+      .filter((b: any) => b.posts)
+      .map((b: any) => mapPost(b.posts, userId));
+  }
+
+  static async getCircleFeed(circleId: string, userId?: string): Promise<Post[]> {
+    const { data: rows, error } = await supabaseAdmin
+      .from("posts")
+      .select(
+        `*,
+        author_profile:profiles!posts_author_id_fkey(*),
+        author_user:users!posts_author_id_fkey(username, is_verified, role),
+        media(*)`
+      )
+      .eq("circle_id", circleId)
+      .eq("is_moderated", false)
+      .order("created_at", { ascending: false })
+      .limit(30);
+
+    if (error || !rows) return [];
+    return rows.map((r: any) => mapPost(r, userId));
+  }
+
+  static async getUserSignals(
+    authorId: string,
     currentUserId?: string,
     tab: "posts" | "replies" | "media" | "liked" = "posts"
-  ): Post[] {
-    const state = db.getState();
-
-    if (tab === "posts") {
-      const userPosts = state.posts
-        .filter(p => p.author_id === targetUserId)
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return userPosts.map(p => PostService.enrichPost(p, currentUserId));
+  ): Promise<Post[]> {
+    if (tab === "liked") {
+      const { data: likes } = await supabaseAdmin
+        .from("post_likes")
+        .select(`posts(*, author_profile:profiles!posts_author_id_fkey(*), author_user:users!posts_author_id_fkey(username, is_verified, role), media(*))`)
+        .eq("user_id", authorId)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (!likes) return [];
+      return likes.filter((l: any) => l.posts).map((l: any) => mapPost(l.posts, currentUserId));
     }
+
+    let query = supabaseAdmin
+      .from("posts")
+      .select(`*, author_profile:profiles!posts_author_id_fkey(*), author_user:users!posts_author_id_fkey(username, is_verified, role), media(*)`)
+      .eq("author_id", authorId)
+      .eq("is_moderated", false)
+      .order("created_at", { ascending: false })
+      .limit(30);
 
     if (tab === "media") {
-      const mediaPostIds = new Set(state.media.map(m => m.post_id));
-      const userPosts = state.posts
-        .filter(p => p.author_id === targetUserId && mediaPostIds.has(p.id))
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return userPosts.map(p => PostService.enrichPost(p, currentUserId));
+      // filter after fetch
     }
 
-    if (tab === "liked") {
-      const likedPostIds = state.post_likes
-        .filter(pl => pl.user_id === targetUserId)
-        .map(pl => pl.post_id);
-      const userPosts = state.posts
-        .filter(p => likedPostIds.includes(p.id))
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return userPosts.map(p => PostService.enrichPost(p, currentUserId));
-    }
+    const { data: rows, error } = await query;
+    if (error || !rows) return [];
 
-    if (tab === "replies") {
-      const userCommentedPostIds = new Set(
-        state.comments.filter(c => c.author_id === targetUserId).map(c => c.post_id)
-      );
-      const userPosts = state.posts
-        .filter(p => userCommentedPostIds.has(p.id))
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return userPosts.map(p => PostService.enrichPost(p, currentUserId));
-    }
-
-    return [];
-  }
-
-  static getCircleFeed(
-    circleId: string,
-    currentUserId?: string,
-    options?: { cursor?: string; limit?: number }
-  ): PaginatedFeedResponse {
-    const state = db.getState();
-    const limit = options?.limit || 15;
-
-    const circlePosts = state.posts
-      .filter(p => p.circle_id === circleId)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    let startIndex = 0;
-    if (options?.cursor) {
-      try {
-        const decoded = Buffer.from(options.cursor, "base64").toString("utf-8");
-        const found = circlePosts.findIndex(p => p.id === decoded);
-        if (found !== -1) startIndex = found + 1;
-      } catch (e) {
-        startIndex = 0;
-      }
-    }
-
-    const slice = circlePosts.slice(startIndex, startIndex + limit);
-    const enriched = slice.map(p => PostService.enrichPost(p, currentUserId));
-    const nextPost = circlePosts[startIndex + limit];
-    const nextCursor = nextPost ? Buffer.from(nextPost.id).toString("base64") : null;
-
-    return {
-      posts: enriched,
-      nextCursor,
-      hasMore: startIndex + limit < circlePosts.length,
-      totalCount: circlePosts.length,
-    };
-  }
-
-  static getBookmarkedPosts(userId: string): Post[] {
-    const state = db.getState();
-    const bookmarkedIds = state.bookmarks
-      .filter(b => b.user_id === userId)
-      .map(b => b.post_id);
-
-    const posts = state.posts
-      .filter(p => bookmarkedIds.includes(p.id))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    return posts.map(p => PostService.enrichPost(p, userId));
+    let posts = rows.map((r: any) => mapPost(r, currentUserId));
+    if (tab === "media") posts = posts.filter((p) => p.media && p.media.length > 0);
+    return posts;
   }
 }

@@ -7,9 +7,9 @@ export async function GET(req: NextRequest) {
   try {
     const userId = req.nextUrl.searchParams.get("userId");
     if (userId) {
-      const user = AuthService.getUserById(userId);
-      if (!user) return errorResponse("USER_NOT_FOUND", "User not found", 404);
-      return successResponse(user);
+      const result = await AuthService.getUserById(userId);
+      if (!result) return errorResponse("USER_NOT_FOUND", "User not found", 404);
+      return successResponse(result);
     }
 
     // Try checking active Supabase session
@@ -54,21 +54,7 @@ export async function POST(req: NextRequest) {
       return successResponse(result);
     }
 
-    if (action === "register") {
-      const result = await AuthService.register({
-        username: body.username,
-        email: body.email,
-        displayName: body.displayName,
-        password: body.password,
-        avatarUrl: body.avatarUrl,
-        bio: body.bio,
-      });
-      return successResponse(result, 201);
-    }
-
-    // Default: Login
-    const result = await AuthService.login(body.emailOrUsername || body.email, body.password);
-    return successResponse(result);
+    return errorResponse("UNSUPPORTED_ACTION", "Action not supported", 400);
   } catch (err: any) {
     return errorResponse("AUTH_FAILED", err.message || "Authentication error", 400);
   }
