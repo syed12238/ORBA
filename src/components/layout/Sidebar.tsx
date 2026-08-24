@@ -127,41 +127,43 @@ export function Sidebar() {
           </button>
 
           {/* Secondary Nav Items */}
-          <div className="pt-3 border-t border-surface-borderLight flex flex-col gap-0.5">
-            <div className="hidden lg:block px-3 pb-1 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
-              Ecosystem
-            </div>
-            {SECONDARY_NAV_ITEMS.map((item) => {
-              const isActive = pathname.startsWith(item.href);
-              const Icon = item.icon;
+          {SECONDARY_NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === "ADMIN").length > 0 && (
+            <div className="pt-3 border-t border-surface-borderLight flex flex-col gap-0.5">
+              <div className="hidden lg:block px-3 pb-1 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
+                Ecosystem
+              </div>
+              {SECONDARY_NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === "ADMIN").map((item) => {
+                const isActive = pathname.startsWith(item.href);
+                const Icon = item.icon;
 
-              const secLink = (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className={`flex items-center justify-center lg:justify-start gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                    isActive
-                      ? "text-orba-300 bg-surface-elevated/80"
-                      : "text-zinc-400 hover:text-zinc-200 hover:bg-surface-hover/50"
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="hidden lg:inline">{item.label}</span>
-                </Link>
-              );
+                const secLink = (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className={`flex items-center justify-center lg:justify-start gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                      isActive
+                        ? "text-orba-300 bg-surface-elevated/80 font-semibold"
+                        : "text-zinc-400 hover:text-zinc-200 hover:bg-surface-hover/50"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span className="hidden lg:inline">{item.label}</span>
+                  </Link>
+                );
 
-              return (
-                <div key={item.label} className="w-full">
-                  <div className="lg:hidden">
-                    <Tooltip content={item.label} side="right">
-                      {secLink}
-                    </Tooltip>
+                return (
+                  <div key={item.label} className="w-full">
+                    <div className="lg:hidden">
+                      <Tooltip content={item.label} side="right">
+                        {secLink}
+                      </Tooltip>
+                    </div>
+                    <div className="hidden lg:block">{secLink}</div>
                   </div>
-                  <div className="hidden lg:block">{secLink}</div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* User Profile / Login Drawer */}

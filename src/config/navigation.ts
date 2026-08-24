@@ -6,11 +6,9 @@ import {
   Users2,
   Bookmark,
   User as UserIcon,
-  Terminal,
   ShieldAlert,
   Settings,
 } from "lucide-react";
-import { UserRole } from "@/types";
 
 export interface NavItemConfig {
   label: string;
@@ -32,7 +30,6 @@ export const PRIMARY_NAV_ITEMS: NavItemConfig[] = [
 ];
 
 export const SECONDARY_NAV_ITEMS: NavItemConfig[] = [
-  { label: "Developer API", href: "/developer", icon: Terminal },
   { label: "Admin Console", href: "/admin", icon: ShieldAlert, adminOnly: true },
   { label: "Settings", href: "/settings", icon: Settings },
 ];

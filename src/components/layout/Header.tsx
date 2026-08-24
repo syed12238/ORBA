@@ -22,7 +22,6 @@ export function Header() {
     if (pathname.startsWith("/profile")) return "Profile";
     if (pathname.startsWith("/settings")) return "Settings";
     if (pathname.startsWith("/admin")) return "Admin Console";
-    if (pathname.startsWith("/developer")) return "Developer API";
     return "ORBA";
   };
 

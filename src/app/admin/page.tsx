@@ -86,6 +86,21 @@ export default function AdminPage() {
     }
   };
 
+  if (!user || user.role !== "ADMIN") {
+    return (
+      <div className="w-full max-w-lg mx-auto min-h-[60vh] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-4 text-rose-400">
+          <ShieldAlert className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-bold text-white mb-2">Restricted Governance Console</h2>
+        <p className="text-xs text-zinc-400 max-w-sm mb-6 leading-relaxed">
+          Access to system telemetry, moderation queues, and platform configuration is strictly reserved for verified administrators.
+        </p>
+        <Button onClick={() => (window.location.href = "/")}>Return to Orbit</Button>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return <LoadingState text="Connecting to system telemetry matrix..." />;
   }

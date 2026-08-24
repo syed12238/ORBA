@@ -10,6 +10,15 @@ const nextConfig = {
       { protocol: "https", hostname: "raw.githubusercontent.com" },
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: "/developer",
+        destination: "/",
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

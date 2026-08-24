@@ -190,8 +190,8 @@ export function RightContextPanel() {
 
       {/* Footer Info */}
       <div className="px-2 pt-2 text-[11px] text-zinc-500 flex flex-wrap gap-x-3 gap-y-1 font-mono">
-        <Link href="/developer" className="hover:text-zinc-300">API</Link>
         <Link href="/settings" className="hover:text-zinc-300">Privacy & Terms</Link>
+        <Link href="/circles" className="hover:text-zinc-300">Circles</Link>
         <span>© 2026 ORBA Platform</span>
       </div>
     </aside>
