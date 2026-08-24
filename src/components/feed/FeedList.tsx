@@ -147,17 +147,26 @@ export function FeedList() {
           />
         ) : posts.length === 0 ? (
           <EmptyState
-            icon={Sparkles}
+            icon={<Sparkles className="w-6 h-6 text-orba-400" />}
             title="No signals in this orbit"
             description="Be the first to emit a signal or follow people to populate your feed."
-            actionLabel={user ? "Emit Signal" : "Sign In to Post"}
-            onAction={() => {
-              if (user) {
-                setIsModalCreateOpen(true);
-              } else {
-                window.location.href = "/login";
-              }
-            }}
+            action={
+              user ? (
+                <button
+                  onClick={() => setIsModalCreateOpen(true)}
+                  className="px-4 py-1.5 rounded-full bg-orba-600 hover:bg-orba-500 text-white text-xs font-semibold transition-colors"
+                >
+                  Emit Signal
+                </button>
+              ) : (
+                <a
+                  href="/login"
+                  className="px-4 py-1.5 rounded-full bg-orba-600 hover:bg-orba-500 text-white text-xs font-semibold transition-colors"
+                >
+                  Sign In to Post
+                </a>
+              )
+            }
           />
         ) : (
           posts.map((post) => (

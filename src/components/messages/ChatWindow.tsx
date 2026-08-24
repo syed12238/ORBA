@@ -12,9 +12,10 @@ import { Button } from "../ui/Button";
 interface ChatWindowProps {
   conversation: Conversation;
   onNewMessageSent?: (msg: Message) => void;
+  onBack?: () => void;
 }
 
-export function ChatWindow({ conversation, onNewMessageSent }: ChatWindowProps) {
+export function ChatWindow({ conversation, onNewMessageSent, onBack }: ChatWindowProps) {
   const { user } = useAuth();
   const { latestMessage, typingUsers, emitTyping, presences } = useRealtime();
 
