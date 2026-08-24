@@ -200,12 +200,7 @@ export default function MessagesPage() {
                     alt={other?.display_name || "User"}
                     size="md"
                     presence={
-                      presence?.status === "ONLINE"
-                        ? "ONLINE"
-                        : presence?.status === "AWAY"
-                        ? "AWAY"
-                        : undefined
-                    }
+                      presence?.status as any}
                   />
 
                   <div className="flex-1 min-w-0">
