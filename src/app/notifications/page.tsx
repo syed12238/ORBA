@@ -178,10 +178,10 @@ export default function NotificationsPage() {
 
                 {notif.post && (
                   <Link
-                    href={`/#${notif.post.id}`}
+                    href={`/post/${notif.post.id}`}
                     className="block mt-2 p-2.5 rounded-xl bg-surface-card/80 border border-surface-border text-xs text-zinc-300 hover:text-white transition-colors truncate"
                   >
-                    "{notif.post.content}"
+                    &ldquo;{notif.post.content}&rdquo;
                   </Link>
                 )}
               </div>

@@ -216,6 +216,31 @@ export class PostService {
     return true;
   }
 
+  static async editPost(postId: string, userId: string, content: string): Promise<any> {
+    const { data: post, error: fetchErr } = await supabaseAdmin
+      .from("posts")
+      .select("author_id")
+      .eq("id", postId)
+      .single();
+
+    if (fetchErr || !post) throw new Error("Signal not found.");
+
+    if (post.author_id !== userId) {
+      throw new Error("Only the author can edit this signal.");
+    }
+
+    const { data: updated, error: updateErr } = await supabaseAdmin
+      .from("posts")
+      .update({ content, updated_at: new Date().toISOString() })
+      .eq("id", postId)
+      .select("*")
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    return updated;
+  }
+
   static async toggleLike(
     postId: string,
     userId: string

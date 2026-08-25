@@ -63,3 +63,11 @@ export async function deletePost(postId: string): Promise<{ deleted: boolean; id
   });
 }
 
+export async function editPost(postId: string, content: string): Promise<Post> {
+  return request<Post>(`/api/v1/posts/${postId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ content }),
+  });
+}
+
+

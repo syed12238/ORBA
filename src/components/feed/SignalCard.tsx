@@ -6,12 +6,12 @@ import { useRouter } from "next/navigation";
 import { 
   Heart, MessageSquare, Repeat2, Bookmark, Share2, 
   MoreHorizontal, ShieldAlert, Sparkles, CheckCircle2,
-  Trash2, Copy
+  Trash2, Copy, Edit3
 } from "lucide-react";
 import { Post } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { likePost, bookmarkPost, repostPost, reportPost, deletePost } from "@/lib/api";
+import { likePost, bookmarkPost, repostPost, reportPost, deletePost, editPost } from "@/lib/api";
 import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
 import { Modal } from "../ui/Modal";
@@ -37,6 +37,9 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Determine if current user can delete this post
   const isAuthor = Boolean(
@@ -171,8 +174,23 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
 
   const handleShare = () => {
     if (typeof window !== "undefined") {
-      navigator.clipboard.writeText(`${window.location.origin}/#${post.id}`);
+      navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
       info("Signal orbit link copied to clipboard!");
+    }
+  };
+
+  const handleEdit = async () => {
+    if (!editContent.trim()) return;
+    setIsSavingEdit(true);
+    try {
+      const updated = await editPost(post.id, editContent.trim());
+      setPost((prev) => ({ ...prev, content: updated.content, updated_at: updated.updated_at }));
+      success("Signal updated successfully.");
+      setIsEditModalOpen(false);
+    } catch (err: any) {
+      error(err.message || "Failed to update signal.");
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -307,6 +325,19 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
                 <Copy className="w-3.5 h-3.5" />
                 <span>Copy Link</span>
               </button>
+              {isAuthor && (
+                <button
+                  onClick={() => {
+                    setEditContent(post.content || "");
+                    setIsEditModalOpen(true);
+                    setIsMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-surface-hover transition-colors"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Signal</span>
+                </button>
+              )}
               {canDelete && (
                 <button
                   onClick={() => {
@@ -512,6 +543,50 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
             >
               Delete Signal
             </Button>
+          </div>
+        </div>
+      </Modal>
+      {/* Edit Signal Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => !isSavingEdit && setIsEditModalOpen(false)}
+        title="Edit Signal"
+        description="Update the content of your signal. Changes will be visible immediately."
+      >
+        <div className="flex flex-col gap-4">
+          <textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            placeholder="What's orbiting your mind?"
+            rows={4}
+            maxLength={2000}
+            className="w-full p-3 rounded-xl bg-surface-elevated border border-surface-border text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orba-500 resize-none"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono text-zinc-500">
+              {editContent.length}/2000
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isSavingEdit}
+                onClick={() => setIsEditModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                isLoading={isSavingEdit}
+                onClick={handleEdit}
+                disabled={!editContent.trim() || editContent.trim() === post.content}
+              >
+                Save Changes
+              </Button>
+            </div>
           </div>
         </div>
       </Modal>
