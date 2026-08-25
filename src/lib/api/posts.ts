@@ -56,3 +56,10 @@ export async function reportPost(postId: string, reason: string): Promise<{ id: 
     }),
   });
 }
+
+export async function deletePost(postId: string): Promise<{ deleted: boolean; id: string }> {
+  return request<{ deleted: boolean; id: string }>(`/api/v1/posts/${postId}`, {
+    method: "DELETE",
+  });
+}
+

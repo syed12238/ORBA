@@ -34,6 +34,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     async function initAuth() {
       try {
+        // Handle OAuth code exchange if redirected with ?code= in the URL
+        if (typeof window !== "undefined") {
+          const urlParams = new URLSearchParams(window.location.search);
+          const code = urlParams.get("code");
+          if (code) {
+            try {
+              const { data: codeData, error: codeErr } = await supabase.auth.exchangeCodeForSession(code);
+              if (!codeErr && codeData?.session?.user) {
+                if (mounted) {
+                  setSession(codeData.session);
+                  setSupabaseUser(codeData.session.user);
+                }
+                await syncAndLoadUser(codeData.session.user);
+              }
+            } catch (exchangeErr) {
+              console.warn("Client-side code exchange error:", exchangeErr);
+            } finally {
+              // Clean code from the URL bar without reloading
+              const cleanUrl = window.location.pathname + (window.location.hash || "");
+              window.history.replaceState({}, document.title, cleanUrl);
+            }
+          }
+        }
+
         // Check Supabase session
         const { data: { session: initialSession } } = await supabase.auth.getSession();
 

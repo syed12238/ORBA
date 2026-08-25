@@ -169,25 +169,35 @@ export class PostService {
   }
 
   static async deletePost(postId: string, userId: string): Promise<boolean> {
-    const { data: post } = await supabaseAdmin
+    const { data: post, error: fetchErr } = await supabaseAdmin
       .from("posts")
       .select("author_id")
       .eq("id", postId)
       .single();
 
-    if (!post) throw new Error("Post not found.");
+    if (fetchErr || !post) throw new Error("Signal not found.");
 
-    const { data: user } = await supabaseAdmin
-      .from("users")
-      .select("role")
-      .eq("id", userId)
-      .single();
+    if (post.author_id !== userId) {
+      const { data: user } = await supabaseAdmin
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .single();
 
-    if (post.author_id !== userId && user?.role !== "ADMIN" && user?.role !== "MODERATOR") {
-      throw new Error("You do not have permission to delete this signal.");
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("role")
+        .eq("user_id", userId)
+        .single();
+
+      const role = user?.role || (profile as any)?.role;
+      if (role !== "ADMIN" && role !== "MODERATOR") {
+        throw new Error("You do not have permission to delete this signal.");
+      }
     }
 
-    await supabaseAdmin.from("posts").delete().eq("id", postId);
+    const { error: deleteErr } = await supabaseAdmin.from("posts").delete().eq("id", postId);
+    if (deleteErr) throw deleteErr;
 
     // Decrement posts count
     const { data: profile } = await supabaseAdmin
@@ -199,7 +209,7 @@ export class PostService {
     if (profile && profile.posts_count > 0) {
       await supabaseAdmin
         .from("profiles")
-        .update({ posts_count: profile.posts_count - 1 })
+        .update({ posts_count: Math.max(0, profile.posts_count - 1) })
         .eq("user_id", post.author_id);
     }
 

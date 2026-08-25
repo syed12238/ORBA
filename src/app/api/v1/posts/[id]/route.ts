@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const userId = req.headers.get("x-user-id");
+    const userId = req.headers.get("x-user-id") || req.nextUrl.searchParams.get("userId");
     if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required", 401);
 
     await PostService.deletePost(params.id, userId);

@@ -164,7 +164,15 @@ export default function CircleDetailPage() {
             }
           />
         ) : (
-          posts.map((post) => <SignalCard key={post.id} post={post} />)
+          posts.map((post) => (
+            <SignalCard
+              key={post.id}
+              post={post}
+              onPostDeleted={(id) =>
+                setPosts((prev) => prev.filter((p) => p.id !== id))
+              }
+            />
+          ))
         )}
       </div>
 

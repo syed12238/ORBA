@@ -50,7 +50,13 @@ export default function BookmarksPage() {
       ) : (
         <div className="flex flex-col gap-4">
           {bookmarks.map((post) => (
-            <SignalCard key={post.id} post={post} />
+            <SignalCard
+              key={post.id}
+              post={post}
+              onPostDeleted={(id) =>
+                setBookmarks((prev) => prev.filter((p) => p.id !== id))
+              }
+            />
           ))}
         </div>
       )}

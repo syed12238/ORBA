@@ -234,7 +234,16 @@ function ExploreContent() {
                 Matching Signals ({results.posts.length})
               </span>
               {results.posts.map((post) => (
-                <SignalCard key={post.id} post={post} />
+                <SignalCard
+                  key={post.id}
+                  post={post}
+                  onPostDeleted={(id) =>
+                    setResults((prev) => ({
+                      ...prev,
+                      posts: prev.posts.filter((p) => p.id !== id),
+                    }))
+                  }
+                />
               ))}
             </div>
           )}

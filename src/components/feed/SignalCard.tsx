@@ -11,7 +11,7 @@ import {
 import { Post } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
-import { likePost, bookmarkPost, repostPost, reportPost } from "@/lib/api";
+import { likePost, bookmarkPost, repostPost, reportPost, deletePost } from "@/lib/api";
 import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
 import { Modal } from "../ui/Modal";
@@ -35,11 +35,41 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
   const [isReporting, setIsReporting] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Determine if current user can delete this post
+  const isAuthor = Boolean(
+    user && (
+      user.id === post.author_id ||
+      user.id === post.author?.user_id ||
+      user.id === (post.author as any)?.id ||
+      user.username === post.author?.username ||
+      (user.email && (post.author as any)?.email && user.email === (post.author as any)?.email)
+    )
+  );
+  const isAdmin = user?.role === "ADMIN" || user?.role === "MODERATOR";
+  const canDelete = isAuthor || isAdmin;
 
   // Sync state if initialPost updates
   React.useEffect(() => {
     setPost(initialPost);
   }, [initialPost]);
+
+  const handleDelete = async () => {
+    if (!canDelete) return;
+    setIsDeleting(true);
+    try {
+      await deletePost(post.id);
+      success("Signal deleted successfully.");
+      setIsDeleteModalOpen(false);
+      onPostDeleted?.(post.id);
+    } catch (err: any) {
+      error(err.message || "Failed to delete signal.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleLike = async () => {
     if (!user) {
@@ -277,12 +307,24 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
                 <Copy className="w-3.5 h-3.5" />
                 <span>Copy Link</span>
               </button>
+              {canDelete && (
+                <button
+                  onClick={() => {
+                    setIsDeleteModalOpen(true);
+                    setIsMenuOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-rose-400 hover:bg-rose-950/40 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Signal</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setIsReporting(true);
                   setIsMenuOpen(false);
                 }}
-                className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-rose-400 hover:bg-rose-950/40 transition-colors"
+                className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:bg-surface-hover transition-colors"
               >
                 <ShieldAlert className="w-3.5 h-3.5" />
                 <span>Report Signal</span>
@@ -436,6 +478,42 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => !isDeleting && setIsDeleteModalOpen(false)}
+        title="Delete Signal"
+        description="Are you sure you want to delete this signal? This action cannot be undone and will permanently remove the signal and its discussion."
+      >
+        <div className="flex flex-col gap-4">
+          {post.content && (
+            <div className="p-3 rounded-xl bg-surface-elevated/70 border border-surface-border text-xs text-zinc-300 line-clamp-3 italic">
+              &ldquo;{post.content}&rdquo;
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isDeleting}
+              onClick={() => setIsDeleteModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              isLoading={isDeleting}
+              onClick={handleDelete}
+            >
+              Delete Signal
+            </Button>
+          </div>
+        </div>
       </Modal>
     </article>
   );
