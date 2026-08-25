@@ -163,7 +163,8 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
     }
   };
 
-  const formatContent = (text: string) => {
+  const formatContent = (text?: string) => {
+    if (!text) return null;
     const parts = text.split(/(\s+)/);
     return parts.map((part, i) => {
       if (part.startsWith("#")) {
@@ -194,9 +195,19 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
     });
   };
 
-  const author = post.author;
+  const author = post?.author;
   const username = author?.username || "unknown";
   const displayName = author?.display_name || username;
+
+  let formattedTime = "just now";
+  try {
+    if (post?.created_at) {
+      formattedTime = new Date(post.created_at).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  } catch {}
 
   return (
     <article
@@ -208,7 +219,7 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
           <Sparkles className="w-3 h-3 text-orba-400" />
           <span>Orbiting in</span>
           <Link
-            href={`/circles/${post.circle.slug}`}
+            href={`/circles/${post.circle.slug || post.circle.id}`}
             className="text-orba-300 hover:underline font-semibold"
           >
             {post.circle.name}
@@ -239,12 +250,7 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
             <div className="flex items-center gap-2 text-[11px] text-zinc-400 font-mono">
               <span>@{username}</span>
               <span>•</span>
-              <span>
-                {new Date(post.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
+              <span>{formattedTime}</span>
             </div>
           </div>
         </Link>
@@ -287,20 +293,25 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
       </div>
 
       {/* Signal Text Content */}
-      <div className="mt-3 text-xs sm:text-sm text-zinc-100 leading-relaxed break-words whitespace-pre-line font-sans selection:bg-orba-500/30">
-        {formatContent(post.content)}
-      </div>
+      {post.content && (
+        <div className="mt-3 text-xs sm:text-sm text-zinc-100 leading-relaxed break-words whitespace-pre-line font-sans selection:bg-orba-500/30">
+          {formatContent(post.content)}
+        </div>
+      )}
 
       {/* Media Attachments Gallery */}
-      {post.media && post.media.length > 0 && (
+      {post.media && Array.isArray(post.media) && post.media.length > 0 && (
         <div className="mt-3 rounded-xl overflow-hidden border border-surface-border bg-obsidian">
-          {post.media.map((m) => (
-            <div key={m.id} className="relative aspect-video max-h-96 w-full">
+          {post.media.map((m, idx) => (
+            <div key={m.id || m.url || idx} className="relative aspect-video max-h-96 w-full">
               <img
                 src={m.url}
                 alt="Signal media attachment"
                 className="w-full h-full object-cover"
                 loading="lazy"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = "none";
+                }}
               />
             </div>
           ))}
