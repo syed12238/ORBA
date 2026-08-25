@@ -194,9 +194,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateLocalProfile = (newProfileData: Partial<Profile>) => {
-    if (profile) {
-      setProfile({ ...profile, ...newProfileData });
-    }
+    setProfile((prev) => (prev ? { ...prev, ...newProfileData } : (newProfileData as Profile)));
+    setUser((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        profile: prev.profile ? { ...prev.profile, ...newProfileData } : (newProfileData as Profile),
+      };
+    });
   };
 
   return (
