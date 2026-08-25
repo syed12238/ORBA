@@ -78,8 +78,12 @@ export class SearchService {
       .from("posts")
       .select(`
         *,
-        author_profile:profiles!posts_author_id_fkey(*),
-        author_user:users!posts_author_id_fkey(username, is_verified, role),
+        author_user:users!posts_author_id_fkey(
+          username,
+          is_verified,
+          role,
+          profiles(*)
+        ),
         media(*)
       `)
       .ilike("content", `%${clean}%`)
@@ -88,15 +92,17 @@ export class SearchService {
       .limit(limit);
 
     const posts: Post[] = (postRows || []).map((r: any) => {
-      const p = Array.isArray(r.author_profile) ? r.author_profile[0] : r.author_profile;
-      const u = Array.isArray(r.author_user) ? r.author_user[0] : r.author_user;
+      const authorUser = Array.isArray(r.author_user) ? r.author_user[0] : r.author_user;
+      const authorProfile = authorUser?.profiles ? (Array.isArray(authorUser.profiles) ? authorUser.profiles[0] : authorUser.profiles) : undefined;
+      const username = authorUser?.username || "user";
+      const displayName = authorProfile?.display_name || username;
 
       return {
         id: r.id,
         author_id: r.author_id,
         circle_id: r.circle_id,
-        content: r.content,
-        visibility: r.visibility,
+        content: r.content || "",
+        visibility: r.visibility || "PUBLIC",
         like_count: r.like_count ?? 0,
         comment_count: r.comment_count ?? 0,
         repost_count: r.repost_count ?? 0,
@@ -105,12 +111,23 @@ export class SearchService {
         is_moderated: r.is_moderated ?? false,
         created_at: r.created_at,
         updated_at: r.updated_at,
-        author: p ? {
-          ...p,
-          username: u?.username || "user",
-          is_verified: u?.is_verified ?? false,
-          role: u?.role || "USER",
-        } : undefined,
+        author: {
+          user_id: authorProfile?.user_id || r.author_id,
+          display_name: displayName,
+          avatar_url: authorProfile?.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${username}`,
+          banner_url: authorProfile?.banner_url || "",
+          bio: authorProfile?.bio || "",
+          website: authorProfile?.website || "",
+          location: authorProfile?.location || "",
+          followers_count: authorProfile?.followers_count ?? 0,
+          following_count: authorProfile?.following_count ?? 0,
+          posts_count: authorProfile?.posts_count ?? 0,
+          created_at: authorProfile?.created_at || r.created_at,
+          updated_at: authorProfile?.updated_at || r.updated_at,
+          username,
+          is_verified: authorUser?.is_verified ?? false,
+          role: authorUser?.role || "USER",
+        },
         media: r.media || [],
       };
     });

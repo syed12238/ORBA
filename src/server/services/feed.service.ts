@@ -16,46 +16,52 @@ interface FeedResponse {
 }
 
 function mapPost(row: any, userId?: string): Post {
-  const authorProfile = Array.isArray(row.author_profile)
-    ? row.author_profile[0]
-    : row.author_profile;
   const authorUser = Array.isArray(row.author_user)
     ? row.author_user[0]
-    : row.author_user;
+    : row.author_user || (Array.isArray(row.users) ? row.users[0] : row.users);
+
+  let authorProfile = Array.isArray(row.author_profile)
+    ? row.author_profile[0]
+    : row.author_profile || (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles);
+
+  if (!authorProfile && authorUser?.profiles) {
+    authorProfile = Array.isArray(authorUser.profiles) ? authorUser.profiles[0] : authorUser.profiles;
+  }
+
+  const username = authorUser?.username || "orbit_user";
+  const displayName = authorProfile?.display_name || username;
 
   return {
     id: row.id,
     author_id: row.author_id,
     circle_id: row.circle_id,
-    content: row.content,
-    visibility: row.visibility,
+    content: row.content || "",
+    visibility: row.visibility || "PUBLIC",
     like_count: row.like_count ?? 0,
     comment_count: row.comment_count ?? 0,
     repost_count: row.repost_count ?? 0,
     bookmark_count: row.bookmark_count ?? 0,
-    ranking_score: row.ranking_score ?? 0,
+    ranking_score: Number(row.ranking_score ?? 0),
     is_moderated: row.is_moderated ?? false,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    author: authorProfile
-      ? {
-          user_id: authorProfile.user_id,
-          display_name: authorProfile.display_name,
-          avatar_url: authorProfile.avatar_url,
-          banner_url: authorProfile.banner_url,
-          bio: authorProfile.bio,
-          website: authorProfile.website,
-          location: authorProfile.location,
-          followers_count: authorProfile.followers_count ?? 0,
-          following_count: authorProfile.following_count ?? 0,
-          posts_count: authorProfile.posts_count ?? 0,
-          created_at: authorProfile.created_at,
-          updated_at: authorProfile.updated_at,
-          username: authorUser?.username || "unknown",
-          is_verified: authorUser?.is_verified ?? false,
-          role: authorUser?.role || "USER",
-        }
-      : undefined,
+    created_at: row.created_at || new Date().toISOString(),
+    updated_at: row.updated_at || new Date().toISOString(),
+    author: {
+      user_id: authorProfile?.user_id || row.author_id,
+      display_name: displayName,
+      avatar_url: authorProfile?.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${username}`,
+      banner_url: authorProfile?.banner_url || "",
+      bio: authorProfile?.bio || "",
+      website: authorProfile?.website || "",
+      location: authorProfile?.location || "",
+      followers_count: authorProfile?.followers_count ?? 0,
+      following_count: authorProfile?.following_count ?? 0,
+      posts_count: authorProfile?.posts_count ?? 0,
+      created_at: authorProfile?.created_at || row.created_at,
+      updated_at: authorProfile?.updated_at || row.updated_at,
+      username,
+      is_verified: authorUser?.is_verified ?? false,
+      role: authorUser?.role || "USER",
+    },
     media: row.media || [],
     has_liked: userId ? (row.liked_by_user ?? false) : false,
     has_reposted: userId ? (row.reposted_by_user ?? false) : false,
@@ -85,24 +91,24 @@ export class FeedService {
       }
     }
 
-    // Build query
+    // Build query with robust nested joins
     let query = supabaseAdmin
       .from("posts")
-      .select(
-        `
+      .select(`
         *,
-        author_profile:profiles!posts_author_id_fkey(*),
-        author_user:users!posts_author_id_fkey(username, is_verified, role),
+        author_user:users!posts_author_id_fkey(
+          username,
+          is_verified,
+          role,
+          profiles(*)
+        ),
         media(*)
-      `
-      )
+      `)
       .eq("is_moderated", false)
       .eq("visibility", "PUBLIC");
 
     if (filter === "following" && followedIds.length > 0) {
       query = query.in("author_id", followedIds);
-    } else if (filter === "media") {
-      // Only posts with media — filter after fetch
     } else if (filter === "trending") {
       query = query.order("ranking_score", { ascending: false });
     }
@@ -174,17 +180,19 @@ export class FeedService {
   static async getBookmarkedPosts(userId: string): Promise<Post[]> {
     const { data: bookmarks } = await supabaseAdmin
       .from("bookmarks")
-      .select(
-        `
+      .select(`
         post_id,
         posts(
           *,
-          author_profile:profiles!posts_author_id_fkey(*),
-          author_user:users!posts_author_id_fkey(username, is_verified, role),
+          author_user:users!posts_author_id_fkey(
+            username,
+            is_verified,
+            role,
+            profiles(*)
+          ),
           media(*)
         )
-      `
-      )
+      `)
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
@@ -198,12 +206,16 @@ export class FeedService {
   static async getCircleFeed(circleId: string, userId?: string): Promise<Post[]> {
     const { data: rows, error } = await supabaseAdmin
       .from("posts")
-      .select(
-        `*,
-        author_profile:profiles!posts_author_id_fkey(*),
-        author_user:users!posts_author_id_fkey(username, is_verified, role),
-        media(*)`
-      )
+      .select(`
+        *,
+        author_user:users!posts_author_id_fkey(
+          username,
+          is_verified,
+          role,
+          profiles(*)
+        ),
+        media(*)
+      `)
       .eq("circle_id", circleId)
       .eq("is_moderated", false)
       .order("created_at", { ascending: false })
@@ -221,25 +233,42 @@ export class FeedService {
     if (tab === "liked") {
       const { data: likes } = await supabaseAdmin
         .from("post_likes")
-        .select(`posts(*, author_profile:profiles!posts_author_id_fkey(*), author_user:users!posts_author_id_fkey(username, is_verified, role), media(*))`)
+        .select(`
+          posts(
+            *,
+            author_user:users!posts_author_id_fkey(
+              username,
+              is_verified,
+              role,
+              profiles(*)
+            ),
+            media(*)
+          )
+        `)
         .eq("user_id", authorId)
         .order("created_at", { ascending: false })
         .limit(30);
+
       if (!likes) return [];
       return likes.filter((l: any) => l.posts).map((l: any) => mapPost(l.posts, currentUserId));
     }
 
     let query = supabaseAdmin
       .from("posts")
-      .select(`*, author_profile:profiles!posts_author_id_fkey(*), author_user:users!posts_author_id_fkey(username, is_verified, role), media(*)`)
+      .select(`
+        *,
+        author_user:users!posts_author_id_fkey(
+          username,
+          is_verified,
+          role,
+          profiles(*)
+        ),
+        media(*)
+      `)
       .eq("author_id", authorId)
       .eq("is_moderated", false)
       .order("created_at", { ascending: false })
       .limit(30);
-
-    if (tab === "media") {
-      // filter after fetch
-    }
 
     const { data: rows, error } = await query;
     if (error || !rows) return [];
