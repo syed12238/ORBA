@@ -6,7 +6,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const currentUserId = req.headers.get("x-user-id") || req.nextUrl.searchParams.get("userId") || undefined;
-    const comments = PostService.getPostComments(params.id, currentUserId);
+    const comments = await PostService.getPostComments(params.id, currentUserId);
     return successResponse({ comments });
   } catch (err: any) {
     return errorResponse("COMMENTS_FETCH_ERROR", err.message, 500);
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return errorResponse("VALIDATION_ERROR", parsed.error.issues[0].message, 422);
     }
 
-    const comment = PostService.addComment(params.id, userId, parsed.data.content, parsed.data.parentId);
+    const comment = await PostService.addComment(params.id, userId, parsed.data.content, parsed.data.parentId);
     return successResponse(comment, 201);
   } catch (err: any) {
     return errorResponse("COMMENT_CREATE_ERROR", err.message, 400);

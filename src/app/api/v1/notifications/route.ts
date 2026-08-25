@@ -8,8 +8,8 @@ export async function GET(req: NextRequest) {
     if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required", 401);
 
     const limit = parseInt(req.nextUrl.searchParams.get("limit") || "40", 10);
-    const notifications = NotificationService.getUserNotifications(userId, limit);
-    const unreadCount = NotificationService.getUnreadCount(userId);
+    const notifications = await NotificationService.getUserNotifications(userId, limit);
+    const unreadCount = await NotificationService.getUnreadCount(userId);
 
     return successResponse({ notifications, unreadCount });
   } catch (err: any) {
@@ -24,9 +24,9 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     if (body.notificationId) {
-      NotificationService.markAsRead(body.notificationId, userId);
+      await NotificationService.markAsRead(body.notificationId, userId);
     } else {
-      NotificationService.markAllAsRead(userId);
+      await NotificationService.markAllAsRead(userId);
     }
 
     return successResponse({ success: true });

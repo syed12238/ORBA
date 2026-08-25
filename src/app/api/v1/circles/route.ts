@@ -6,7 +6,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 export async function GET(req: NextRequest) {
   try {
     const currentUserId = req.headers.get("x-user-id") || req.nextUrl.searchParams.get("userId") || undefined;
-    const circles = CircleService.getCircles(currentUserId);
+    const circles = await CircleService.getCircles(currentUserId);
     return successResponse({ circles });
   } catch (err: any) {
     return errorResponse("CIRCLES_FETCH_ERROR", err.message, 500);
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       return errorResponse("VALIDATION_ERROR", parsed.error.issues[0].message, 422);
     }
 
-    const circle = CircleService.createCircle(userId, parsed.data);
+    const circle = await CircleService.createCircle(userId, parsed.data);
     return successResponse(circle, 201);
   } catch (err: any) {
     return errorResponse("CIRCLE_CREATE_ERROR", err.message, 400);

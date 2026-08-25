@@ -9,7 +9,7 @@ export async function GET(req: NextRequest, { params }: { params: { username: st
     const tab = (searchParams.get("tab") || "posts") as "posts" | "replies" | "media" | "liked";
     const currentUserId = req.headers.get("x-user-id") || undefined;
 
-    const profile = UserService.getProfileByUsername(params.username);
+    const profile = await UserService.getProfileByUsername(params.username);
     if (!profile) return errorResponse("USER_NOT_FOUND", "User not found", 404);
 
     const signals = await FeedService.getUserSignals(profile.user_id, currentUserId, tab);

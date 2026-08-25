@@ -1,10 +1,8 @@
-import { db } from "../db";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { Post, Profile, Circle } from "@/types";
-import { PostService } from "./post.service";
 
 export class SearchService {
-  static search(query: string, currentUserId?: string, limit = 20) {
-    const state = db.getState();
+  static async search(query: string, currentUserId?: string, limit = 20) {
     const clean = (query || "").trim().toLowerCase();
 
     if (!clean) {
@@ -16,59 +14,111 @@ export class SearchService {
       };
     }
 
+    const isTagSearch = clean.startsWith("#");
+    const searchTerm = isTagSearch ? clean : `%${clean}%`;
+
     // 1. Search Users
-    const matchedUsers: (Profile & { username: string; is_verified: boolean; is_following?: boolean })[] = [];
-    for (const u of state.users) {
-      const p = state.profiles.find(pr => pr.user_id === u.id);
-      if (
-        u.username.toLowerCase().includes(clean) ||
-        p?.display_name.toLowerCase().includes(clean) ||
-        p?.bio?.toLowerCase().includes(clean)
-      ) {
-        const is_following = currentUserId ? state.follows.some(f => f.follower_id === currentUserId && f.following_id === u.id) : false;
-        matchedUsers.push({
-          ...p!,
-          username: u.username,
-          is_verified: u.is_verified,
-          is_following,
+    const { data: matchedProfiles } = await supabaseAdmin
+      .from("profiles")
+      .select(`
+        *,
+        user:users!profiles_user_id_fkey(username, is_verified, is_suspended)
+      `)
+      .or(`display_name.ilike.%${clean}%,bio.ilike.%${clean}%`)
+      .limit(limit);
+
+    const { data: matchedUsersByName } = await supabaseAdmin
+      .from("users")
+      .select(`
+        id,
+        username,
+        is_verified,
+        is_suspended,
+        profiles(*)
+      `)
+      .ilike("username", `%${clean}%`)
+      .limit(limit);
+
+    const userMap = new Map<string, any>();
+
+    (matchedProfiles || []).forEach((p: any) => {
+      if (p.user && !p.user.is_suspended) {
+        userMap.set(p.user_id, {
+          ...p,
+          username: p.user.username,
+          is_verified: p.user.is_verified,
         });
       }
-    }
+    });
+
+    (matchedUsersByName || []).forEach((u: any) => {
+      if (!u.is_suspended && !userMap.has(u.id)) {
+        const p = Array.isArray(u.profiles) ? u.profiles[0] : u.profiles;
+        if (p) {
+          userMap.set(u.id, {
+            ...p,
+            username: u.username,
+            is_verified: u.is_verified,
+          });
+        }
+      }
+    });
+
+    const users = Array.from(userMap.values()).slice(0, limit);
 
     // 2. Search Circles
-    const matchedCircles: Circle[] = [];
-    for (const c of state.circles) {
-      if (
-        c.name.toLowerCase().includes(clean) ||
-        c.slug.toLowerCase().includes(clean) ||
-        c.description?.toLowerCase().includes(clean)
-      ) {
-        matchedCircles.push(c);
-      }
-    }
+    const { data: circles } = await supabaseAdmin
+      .from("circles")
+      .select("*")
+      .or(`name.ilike.%${clean}%,slug.ilike.%${clean}%,description.ilike.%${clean}%`)
+      .limit(limit);
 
-    // 3. Search Posts / Signals
-    const isTagSearch = clean.startsWith("#");
-    const tagQuery = isTagSearch ? clean.substring(1) : clean;
+    // 3. Search Posts
+    const { data: postRows } = await supabaseAdmin
+      .from("posts")
+      .select(`
+        *,
+        author_profile:profiles!posts_author_id_fkey(*),
+        author_user:users!posts_author_id_fkey(username, is_verified, role),
+        media(*)
+      `)
+      .ilike("content", `%${clean}%`)
+      .eq("is_moderated", false)
+      .order("created_at", { ascending: false })
+      .limit(limit);
 
-    const matchedPosts: Post[] = [];
-    for (const p of state.posts) {
-      const contentLower = p.content.toLowerCase();
-      if (isTagSearch) {
-        if (contentLower.includes(`#${tagQuery}`)) {
-          matchedPosts.push(PostService.enrichPost(p, currentUserId));
-        }
-      } else {
-        if (contentLower.includes(clean)) {
-          matchedPosts.push(PostService.enrichPost(p, currentUserId));
-        }
-      }
-    }
+    const posts: Post[] = (postRows || []).map((r: any) => {
+      const p = Array.isArray(r.author_profile) ? r.author_profile[0] : r.author_profile;
+      const u = Array.isArray(r.author_user) ? r.author_user[0] : r.author_user;
+
+      return {
+        id: r.id,
+        author_id: r.author_id,
+        circle_id: r.circle_id,
+        content: r.content,
+        visibility: r.visibility,
+        like_count: r.like_count ?? 0,
+        comment_count: r.comment_count ?? 0,
+        repost_count: r.repost_count ?? 0,
+        bookmark_count: r.bookmark_count ?? 0,
+        ranking_score: Number(r.ranking_score ?? 0),
+        is_moderated: r.is_moderated ?? false,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        author: p ? {
+          ...p,
+          username: u?.username || "user",
+          is_verified: u?.is_verified ?? false,
+          role: u?.role || "USER",
+        } : undefined,
+        media: r.media || [],
+      };
+    });
 
     return {
-      posts: matchedPosts.slice(0, limit),
-      users: matchedUsers.slice(0, limit),
-      circles: matchedCircles.slice(0, limit),
+      posts,
+      users,
+      circles: circles || [],
       hashtags: this.getTrendingHashtags(),
     };
   }

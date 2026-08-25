@@ -1,33 +1,69 @@
-import { db } from "../db";
-import { Profile, User, UserSettings } from "@/types";
-import { backgroundQueue } from "../workers/queue";
-import { realtimeBus } from "../realtime/event-bus";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { Profile, UserSettings } from "@/types";
 
 export class UserService {
-  static getProfileByUsername(username: string, currentUserId?: string): (Profile & { username: string; is_verified: boolean; email: string; is_private: boolean; role: string }) | null {
-    const state = db.getState();
-    const clean = username.toLowerCase().replace("@", "");
-    const user = state.users.find(u => u.username.toLowerCase() === clean);
-    if (!user) return null;
+  static async getProfileByUsername(
+    username: string,
+    currentUserId?: string
+  ): Promise<(Profile & { username: string; is_verified: boolean; email: string; is_private: boolean; role: string }) | null> {
+    const clean = username.toLowerCase().replace("@", "").trim();
 
-    const profile = state.profiles.find(p => p.user_id === user.id);
-    if (!profile) return null;
+    // Query user and joined profile from Supabase PostgreSQL
+    const { data: user, error } = await supabaseAdmin
+      .from("users")
+      .select(`
+        *,
+        profiles(*)
+      `)
+      .ilike("username", clean)
+      .single();
+
+    if (error || !user) return null;
+
+    const profileData = Array.isArray(user.profiles) ? user.profiles[0] : user.profiles;
+    if (!profileData) return null;
 
     let is_following = false;
     let has_pending_follow_request = false;
 
     if (currentUserId && currentUserId !== user.id) {
-      is_following = state.follows.some(f => f.follower_id === currentUserId && f.following_id === user.id);
-      has_pending_follow_request = state.follow_requests.some(
-        fr => fr.sender_id === currentUserId && fr.recipient_id === user.id && fr.status === "PENDING"
-      );
+      const { data: follow } = await supabaseAdmin
+        .from("follows")
+        .select("id")
+        .eq("follower_id", currentUserId)
+        .eq("following_id", user.id)
+        .single();
+      
+      is_following = !!follow;
+
+      if (!is_following && user.is_private) {
+        const { data: req } = await supabaseAdmin
+          .from("follow_requests")
+          .select("id")
+          .eq("sender_id", currentUserId)
+          .eq("recipient_id", user.id)
+          .eq("status", "PENDING")
+          .single();
+        has_pending_follow_request = !!req;
+      }
     }
 
     return {
-      ...profile,
+      user_id: profileData.user_id,
+      display_name: profileData.display_name,
+      avatar_url: profileData.avatar_url,
+      banner_url: profileData.banner_url,
+      bio: profileData.bio,
+      website: profileData.website,
+      location: profileData.location,
+      followers_count: profileData.followers_count ?? 0,
+      following_count: profileData.following_count ?? 0,
+      posts_count: profileData.posts_count ?? 0,
+      created_at: profileData.created_at,
+      updated_at: profileData.updated_at,
       username: user.username,
-      is_verified: user.is_verified,
-      is_private: user.is_private,
+      is_verified: user.is_verified ?? false,
+      is_private: user.is_private ?? false,
       email: user.email,
       role: user.role,
       is_following,
@@ -35,189 +71,240 @@ export class UserService {
     };
   }
 
-  static updateProfile(userId: string, data: Partial<Profile & { is_private?: boolean }>): Profile {
-    const state = db.getState();
-    const profile = state.profiles.find(p => p.user_id === userId);
-    if (!profile) throw new Error("Profile not found.");
+  static async updateProfile(
+    userId: string,
+    data: Partial<Profile & { is_private?: boolean }>
+  ): Promise<Profile> {
+    const now = new Date().toISOString();
+    const updateData: any = { updated_at: now };
 
-    if (data.display_name) profile.display_name = data.display_name.trim();
-    if (data.bio !== undefined) profile.bio = data.bio.trim();
-    if (data.avatar_url) profile.avatar_url = data.avatar_url;
-    if (data.banner_url) profile.banner_url = data.banner_url;
-    if (data.website !== undefined) profile.website = data.website.trim();
-    if (data.location !== undefined) profile.location = data.location.trim();
-    profile.updated_at = new Date().toISOString();
+    if (data.display_name !== undefined) updateData.display_name = data.display_name.trim();
+    if (data.bio !== undefined) updateData.bio = data.bio.trim();
+    if (data.avatar_url !== undefined) updateData.avatar_url = data.avatar_url;
+    if (data.banner_url !== undefined) updateData.banner_url = data.banner_url;
+    if (data.website !== undefined) updateData.website = data.website.trim();
+    if (data.location !== undefined) updateData.location = data.location.trim();
+
+    const { data: updated, error } = await supabaseAdmin
+      .from("profiles")
+      .update(updateData)
+      .eq("user_id", userId)
+      .select()
+      .single();
+
+    if (error || !updated) {
+      throw new Error(error?.message || "Failed to update profile.");
+    }
 
     if (data.is_private !== undefined) {
-      const user = state.users.find(u => u.id === userId);
-      if (user) {
-        user.is_private = data.is_private;
-      }
+      await supabaseAdmin
+        .from("users")
+        .update({ is_private: data.is_private, updated_at: now })
+        .eq("id", userId);
     }
 
-    db.save();
-
-    backgroundQueue.enqueue("AUDIT_LOG_RECORD", {
-      actorId: userId,
-      action: "PROFILE_UPDATE",
-      resourceType: "PROFILE",
-      resourceId: userId,
-    });
-
-    return profile;
+    return updated;
   }
 
-  static toggleFollow(currentUserId: string, targetUserId: string): { is_following: boolean; is_pending: boolean } {
+  static async toggleFollow(
+    currentUserId: string,
+    targetUserId: string
+  ): Promise<{ is_following: boolean; is_pending: boolean }> {
     if (currentUserId === targetUserId) {
-      throw new Error("You cannot orbit or follow yourself.");
+      throw new Error("You cannot follow yourself.");
     }
 
-    const state = db.getState();
-    const targetUser = state.users.find(u => u.id === targetUserId);
+    const { data: targetUser } = await supabaseAdmin
+      .from("users")
+      .select("id, is_private")
+      .eq("id", targetUserId)
+      .single();
+
     if (!targetUser) throw new Error("Target user does not exist.");
 
-    const existingIndex = state.follows.findIndex(
-      f => f.follower_id === currentUserId && f.following_id === targetUserId
-    );
+    const { data: existingFollow } = await supabaseAdmin
+      .from("follows")
+      .select("id")
+      .eq("follower_id", currentUserId)
+      .eq("following_id", targetUserId)
+      .single();
 
-    const currentUserProfile = state.profiles.find(p => p.user_id === currentUserId);
-    const targetProfile = state.profiles.find(p => p.user_id === targetUserId);
-
-    if (existingIndex > -1) {
+    if (existingFollow) {
       // Unfollow
-      state.follows.splice(existingIndex, 1);
-      if (currentUserProfile) currentUserProfile.following_count = Math.max(0, currentUserProfile.following_count - 1);
-      if (targetProfile) targetProfile.followers_count = Math.max(0, targetProfile.followers_count - 1);
-
-      db.save();
+      await supabaseAdmin.from("follows").delete().eq("id", existingFollow.id);
       return { is_following: false, is_pending: false };
     }
 
-    // Check if target is private account
     if (targetUser.is_private) {
-      const existingReq = state.follow_requests.find(
-        fr => fr.sender_id === currentUserId && fr.recipient_id === targetUserId && fr.status === "PENDING"
-      );
+      const { data: existingReq } = await supabaseAdmin
+        .from("follow_requests")
+        .select("id")
+        .eq("sender_id", currentUserId)
+        .eq("recipient_id", targetUserId)
+        .eq("status", "PENDING")
+        .single();
+
       if (existingReq) {
-        // Cancel request
-        const reqIdx = state.follow_requests.indexOf(existingReq);
-        state.follow_requests.splice(reqIdx, 1);
-        db.save();
+        await supabaseAdmin.from("follow_requests").delete().eq("id", existingReq.id);
         return { is_following: false, is_pending: false };
       }
 
-      state.follow_requests.push({
-        id: `freq_${Date.now()}`,
+      await supabaseAdmin.from("follow_requests").insert({
         sender_id: currentUserId,
         recipient_id: targetUserId,
         status: "PENDING",
-        created_at: new Date().toISOString(),
       });
 
-      // Notify target of follow request
-      backgroundQueue.enqueue("NOTIFICATION_FANOUT", {
-        recipientIds: [targetUserId],
-        actorId: currentUserId,
-        type: "FOLLOW",
-      });
-
-      db.save();
       return { is_following: false, is_pending: true };
     }
 
-    // Public follow
-    state.follows.push({
-      id: `fol_${Date.now()}`,
+    // Insert follow
+    await supabaseAdmin.from("follows").insert({
       follower_id: currentUserId,
       following_id: targetUserId,
-      created_at: new Date().toISOString(),
     });
 
-    if (currentUserProfile) currentUserProfile.following_count++;
-    if (targetProfile) targetProfile.followers_count++;
-
-    // Asynchronously dispatch notification
-    backgroundQueue.enqueue("NOTIFICATION_FANOUT", {
-      recipientIds: [targetUserId],
-      actorId: currentUserId,
+    // Notify target
+    await supabaseAdmin.from("notifications").insert({
+      recipient_id: targetUserId,
+      actor_id: currentUserId,
       type: "FOLLOW",
     });
 
-    db.save();
     return { is_following: true, is_pending: false };
   }
 
-  static getFollowers(targetUserId: string, currentUserId?: string) {
-    const state = db.getState();
-    const followerIds = state.follows
-      .filter(f => f.following_id === targetUserId)
-      .map(f => f.follower_id);
+  static async getFollowers(targetUserId: string, currentUserId?: string) {
+    const { data: follows } = await supabaseAdmin
+      .from("follows")
+      .select(`
+        follower:users!follows_follower_id_fkey(
+          id,
+          username,
+          is_verified,
+          profiles(*)
+        )
+      `)
+      .eq("following_id", targetUserId);
 
-    return followerIds.map(fId => {
-      const user = state.users.find(u => u.id === fId);
-      const profile = state.profiles.find(p => p.user_id === fId);
-      const is_following = currentUserId ? state.follows.some(f => f.follower_id === currentUserId && f.following_id === fId) : false;
-      return {
-        ...profile,
-        username: user?.username || "",
-        is_verified: !!user?.is_verified,
-        is_following,
-      };
-    }).filter(Boolean);
-  }
+    if (!follows) return [];
 
-  static getFollowing(targetUserId: string, currentUserId?: string) {
-    const state = db.getState();
-    const followingIds = state.follows
-      .filter(f => f.follower_id === targetUserId)
-      .map(f => f.following_id);
+    let myFollowsSet = new Set<string>();
+    if (currentUserId) {
+      const { data: myFollows } = await supabaseAdmin
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", currentUserId);
+      myFollowsSet = new Set((myFollows || []).map((f: any) => f.following_id));
+    }
 
-    return followingIds.map(fId => {
-      const user = state.users.find(u => u.id === fId);
-      const profile = state.profiles.find(p => p.user_id === fId);
-      const is_following = currentUserId ? state.follows.some(f => f.follower_id === currentUserId && f.following_id === fId) : false;
-      return {
-        ...profile,
-        username: user?.username || "",
-        is_verified: !!user?.is_verified,
-        is_following,
-      };
-    }).filter(Boolean);
-  }
-
-  static getSuggestedUsers(currentUserId: string, limit = 5) {
-    const state = db.getState();
-    const followingIds = new Set(
-      state.follows.filter(f => f.follower_id === currentUserId).map(f => f.following_id)
-    );
-    followingIds.add(currentUserId);
-
-    const candidates = state.users
-      .filter(u => !followingIds.has(u.id) && !u.is_suspended)
-      .map(u => {
-        const profile = state.profiles.find(p => p.user_id === u.id);
+    return follows
+      .filter((f: any) => f.follower)
+      .map((f: any) => {
+        const u = f.follower;
+        const p = Array.isArray(u.profiles) ? u.profiles[0] : u.profiles;
         return {
-          ...profile,
           user_id: u.id,
           username: u.username,
           is_verified: u.is_verified,
-          display_name: profile?.display_name || u.username,
-          avatar_url: profile?.avatar_url || "",
-          bio: profile?.bio || "",
-          followers_count: profile?.followers_count || 0,
+          display_name: p?.display_name || u.username,
+          avatar_url: p?.avatar_url || "",
+          bio: p?.bio || "",
+          followers_count: p?.followers_count || 0,
+          following_count: p?.following_count || 0,
+          posts_count: p?.posts_count || 0,
+          is_following: myFollowsSet.has(u.id),
         };
-      })
-      .sort((a, b) => b.followers_count - a.followers_count)
-      .slice(0, limit);
-
-    return candidates;
+      });
   }
 
-  static getUserSettings(userId: string): UserSettings {
-    const state = db.getState();
-    let settings = state.user_settings.find(s => s.user_id === userId);
+  static async getFollowing(targetUserId: string, currentUserId?: string) {
+    const { data: follows } = await supabaseAdmin
+      .from("follows")
+      .select(`
+        following:users!follows_following_id_fkey(
+          id,
+          username,
+          is_verified,
+          profiles(*)
+        )
+      `)
+      .eq("follower_id", targetUserId);
+
+    if (!follows) return [];
+
+    let myFollowsSet = new Set<string>();
+    if (currentUserId) {
+      const { data: myFollows } = await supabaseAdmin
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", currentUserId);
+      myFollowsSet = new Set((myFollows || []).map((f: any) => f.following_id));
+    }
+
+    return follows
+      .filter((f: any) => f.following)
+      .map((f: any) => {
+        const u = f.following;
+        const p = Array.isArray(u.profiles) ? u.profiles[0] : u.profiles;
+        return {
+          user_id: u.id,
+          username: u.username,
+          is_verified: u.is_verified,
+          display_name: p?.display_name || u.username,
+          avatar_url: p?.avatar_url || "",
+          bio: p?.bio || "",
+          followers_count: p?.followers_count || 0,
+          following_count: p?.following_count || 0,
+          posts_count: p?.posts_count || 0,
+          is_following: myFollowsSet.has(u.id),
+        };
+      });
+  }
+
+  static async getSuggestedUsers(currentUserId: string, limit = 5) {
+    const { data: follows } = await supabaseAdmin
+      .from("follows")
+      .select("following_id")
+      .eq("follower_id", currentUserId);
+
+    const followingIds = (follows || []).map((f: any) => f.following_id);
+    followingIds.push(currentUserId);
+
+    const { data: candidates, error } = await supabaseAdmin
+      .from("profiles")
+      .select(`
+        *,
+        users!profiles_user_id_fkey(username, is_verified, is_suspended)
+      `)
+      .not("user_id", "in", `(${followingIds.map(id => `"${id}"`).join(",")})`)
+      .order("followers_count", { ascending: false })
+      .limit(limit);
+
+    if (error || !candidates) return [];
+
+    return candidates
+      .filter((c: any) => c.users && !c.users.is_suspended)
+      .map((c: any) => ({
+        user_id: c.user_id,
+        username: c.users?.username || "user",
+        is_verified: c.users?.is_verified ?? false,
+        display_name: c.display_name || c.users?.username || "User",
+        avatar_url: c.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.users?.username || "orbit"}`,
+        bio: c.bio || "",
+        followers_count: c.followers_count || 0,
+      }));
+  }
+
+  static async getUserSettings(userId: string): Promise<UserSettings> {
+    const { data: settings } = await supabaseAdmin
+      .from("user_settings")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+
     if (!settings) {
-      settings = {
+      const defaultSettings: UserSettings = {
         user_id: userId,
         who_can_message: "EVERYONE",
         who_can_mention: "EVERYONE",
@@ -225,17 +312,21 @@ export class UserService {
         in_app_notifications: true,
         theme: "DARK",
       };
-      state.user_settings.push(settings);
-      db.save();
+      await supabaseAdmin.from("user_settings").insert(defaultSettings);
+      return defaultSettings;
     }
+
     return settings;
   }
 
-  static updateUserSettings(userId: string, newSettings: Partial<UserSettings>): UserSettings {
-    const state = db.getState();
-    const settings = this.getUserSettings(userId);
-    Object.assign(settings, newSettings);
-    db.save();
-    return settings;
+  static async updateUserSettings(userId: string, newSettings: Partial<UserSettings>): Promise<UserSettings> {
+    const { data: updated } = await supabaseAdmin
+      .from("user_settings")
+      .update({ ...newSettings, updated_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .select()
+      .single();
+
+    return updated || this.getUserSettings(userId);
   }
 }

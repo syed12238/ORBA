@@ -8,7 +8,7 @@ export async function POST(req: NextRequest, { params }: { params: { slug: strin
     const userId = req.headers.get("x-user-id") || body.userId;
     if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required", 401);
 
-    const result = CircleService.toggleMembership(params.slug, userId);
+    const result = await CircleService.toggleMembership(params.slug, userId);
     return successResponse(result);
   } catch (err: any) {
     return errorResponse("CIRCLE_JOIN_ERROR", err.message, 400);

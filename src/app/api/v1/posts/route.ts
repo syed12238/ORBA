@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       return errorResponse("VALIDATION_ERROR", parsed.error.issues[0].message, 422, parsed.error.issues);
     }
 
-    const post = PostService.createPost(userId, {
+    const post = await PostService.createPost(userId, {
       content: parsed.data.content,
       circleId: parsed.data.circleId,
       visibility: parsed.data.visibility,

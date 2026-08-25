@@ -8,7 +8,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const userId = req.headers.get("x-user-id") || body.userId;
     if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required", 401);
 
-    const result = PostService.toggleCommentLike(params.id, userId);
+    const result = await PostService.toggleCommentLike(params.id, userId);
     return successResponse(result);
   } catch (err: any) {
     return errorResponse("COMMENT_LIKE_ERROR", err.message, 400);

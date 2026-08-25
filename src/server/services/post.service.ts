@@ -1,17 +1,63 @@
-import { db } from "../db";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { Post, Comment, Media, Visibility } from "@/types";
-import { backgroundQueue } from "../workers/queue";
-import { realtimeBus } from "../realtime/event-bus";
+
+function mapPostRow(row: any, currentUserId?: string): Post {
+  const p = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles || row.author_profile;
+  const u = Array.isArray(row.users) ? row.users[0] : row.users || row.author_user;
+  const profile = Array.isArray(p) ? p[0] : p;
+  const user = Array.isArray(u) ? u[0] : u;
+
+  return {
+    id: row.id,
+    author_id: row.author_id,
+    circle_id: row.circle_id,
+    content: row.content,
+    visibility: row.visibility,
+    like_count: row.like_count ?? 0,
+    comment_count: row.comment_count ?? 0,
+    repost_count: row.repost_count ?? 0,
+    bookmark_count: row.bookmark_count ?? 0,
+    ranking_score: Number(row.ranking_score ?? 0),
+    is_moderated: row.is_moderated ?? false,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    author: profile
+      ? {
+          user_id: profile.user_id,
+          display_name: profile.display_name,
+          avatar_url: profile.avatar_url,
+          banner_url: profile.banner_url,
+          bio: profile.bio,
+          website: profile.website,
+          location: profile.location,
+          followers_count: profile.followers_count ?? 0,
+          following_count: profile.following_count ?? 0,
+          posts_count: profile.posts_count ?? 0,
+          created_at: profile.created_at,
+          updated_at: profile.updated_at,
+          username: user?.username || "user",
+          is_verified: user?.is_verified ?? false,
+          role: user?.role || "USER",
+        }
+      : undefined,
+    media: row.media || [],
+    has_liked: currentUserId ? !!row.liked_by_user : false,
+    has_bookmarked: currentUserId ? !!row.bookmarked_by_user : false,
+    has_reposted: currentUserId ? !!row.reposted_by_user : false,
+  };
+}
 
 export class PostService {
-  static createPost(authorId: string, data: {
-    content: string;
-    circleId?: string;
-    visibility?: Visibility;
-    media?: { url: string; storagePath?: string; mimeType?: string; fileSize?: number; width?: number; height?: number }[];
-  }): Post {
-    const state = db.getState();
-    const content = data.content?.trim();
+  static async createPost(
+    authorId: string,
+    data: {
+      content: string;
+      circleId?: string;
+      visibility?: Visibility;
+      media?: { url: string; storagePath?: string; mimeType?: string; fileSize?: number; width?: number; height?: number }[];
+    }
+  ): Promise<Post> {
+    const content = data.content?.trim() || "";
 
     if (!content && (!data.media || data.media.length === 0)) {
       throw new Error("Signal must contain text content or media attachment.");
@@ -21,389 +67,426 @@ export class PostService {
       throw new Error("Signal content cannot exceed 2,000 characters.");
     }
 
-    const author = state.users.find(u => u.id === authorId);
-    if (!author) throw new Error("Author does not exist.");
+    // Insert post into Supabase
+    const { data: newPost, error: postErr } = await supabaseAdmin
+      .from("posts")
+      .insert({
+        author_id: authorId,
+        circle_id: data.circleId || null,
+        content,
+        visibility: data.visibility || "PUBLIC",
+        ranking_score: 500,
+      })
+      .select()
+      .single();
 
-    const authorProfile = state.profiles.find(p => p.user_id === authorId);
+    if (postErr || !newPost) {
+      throw new Error(`Failed to create post: ${postErr?.message}`);
+    }
 
-    const postId = `sig_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
-
-    const newPost: Post = {
-      id: postId,
-      author_id: authorId,
-      circle_id: data.circleId || undefined,
-      content,
-      visibility: data.visibility || "PUBLIC",
-      like_count: 0,
-      comment_count: 0,
-      repost_count: 0,
-      bookmark_count: 0,
-      ranking_score: 500, // Initial boost for fresh signal
-      is_moderated: false,
-      created_at: now,
-      updated_at: now,
-    };
-
-    const postMedia: Media[] = [];
+    // Insert media records
+    const insertedMedia: Media[] = [];
     if (data.media && data.media.length > 0) {
-      for (const m of data.media) {
-        const mediaRecord: Media = {
-          id: `med_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          post_id: postId,
-          storage_path: m.storagePath || m.url,
-          url: m.url,
-          thumbnail_url: m.url,
-          mime_type: m.mimeType || "image/jpeg",
-          file_size: m.fileSize || 102400,
-          width: m.width || 1200,
-          height: m.height || 800,
-          created_at: now,
-        };
-        state.media.push(mediaRecord);
-        postMedia.push(mediaRecord);
+      const mediaRows = data.media.map(m => ({
+        post_id: newPost.id,
+        storage_path: m.storagePath || m.url,
+        url: m.url,
+        thumbnail_url: m.url,
+        mime_type: m.mimeType || "image/jpeg",
+        file_size: m.fileSize || 102400,
+        width: m.width || 1200,
+        height: m.height || 800,
+      }));
 
-        // Enqueue media optimization
-        backgroundQueue.enqueue("MEDIA_PROCESSING", {
-          mediaId: mediaRecord.id,
-          width: mediaRecord.width,
-          height: mediaRecord.height,
-        });
+      const { data: mediaData } = await supabaseAdmin
+        .from("media")
+        .insert(mediaRows)
+        .select();
+
+      if (mediaData) {
+        insertedMedia.push(...mediaData);
       }
     }
 
-    state.posts.unshift(newPost);
-    if (authorProfile) {
-      authorProfile.posts_count++;
+    // Increment author posts count
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("posts_count")
+      .eq("user_id", authorId)
+      .single();
+
+    if (profile) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({ posts_count: (profile.posts_count || 0) + 1 })
+        .eq("user_id", authorId);
     }
 
-    db.save();
+    return this.getPostById(newPost.id, authorId) as Promise<Post>;
+  }
 
-    // Async AI Moderation check
-    backgroundQueue.enqueue("AI_MODERATION", {
-      targetType: "POST",
-      targetId: postId,
-      content,
-    });
+  static async getPostById(postId: string, currentUserId?: string): Promise<Post | null> {
+    const { data: row, error } = await supabaseAdmin
+      .from("posts")
+      .select(`
+        *,
+        author_profile:profiles!posts_author_id_fkey(*),
+        author_user:users!posts_author_id_fkey(username, is_verified, role),
+        media(*)
+      `)
+      .eq("id", postId)
+      .single();
 
-    // Check for mentions @username
-    const mentions = content.match(/@([a-zA-Z0-9_]+)/g);
-    if (mentions) {
-      const mentionedUsernames = mentions.map(m => m.replace("@", "").toLowerCase());
-      const recipientIds = state.users
-        .filter(u => mentionedUsernames.includes(u.username.toLowerCase()) && u.id !== authorId)
-        .map(u => u.id);
+    if (error || !row) return null;
 
-      if (recipientIds.length > 0) {
-        backgroundQueue.enqueue("NOTIFICATION_FANOUT", {
-          recipientIds,
-          actorId: authorId,
-          type: "MENTION",
-          postId,
-        });
-      }
+    const post = mapPostRow(row, currentUserId);
+
+    if (currentUserId) {
+      const [{ data: like }, { data: bookmark }, { data: repost }] = await Promise.all([
+        supabaseAdmin.from("post_likes").select("id").eq("post_id", postId).eq("user_id", currentUserId).single(),
+        supabaseAdmin.from("bookmarks").select("id").eq("post_id", postId).eq("user_id", currentUserId).single(),
+        supabaseAdmin.from("reposts").select("id").eq("post_id", postId).eq("user_id", currentUserId).single(),
+      ]);
+
+      post.has_liked = !!like;
+      post.has_bookmarked = !!bookmark;
+      post.has_reposted = !!repost;
     }
 
-    // Realtime broadcast to live feed subscribers
-    const fullPost = this.enrichPost(newPost, authorId);
-    realtimeBus.emitEvent("SIGNAL_COMMENT", { post: fullPost });
-
-    return fullPost;
+    return post;
   }
 
-  static getPostById(postId: string, currentUserId?: string): Post | null {
-    const state = db.getState();
-    const post = state.posts.find(p => p.id === postId);
-    if (!post) return null;
-    return this.enrichPost(post, currentUserId);
-  }
+  static async deletePost(postId: string, userId: string): Promise<boolean> {
+    const { data: post } = await supabaseAdmin
+      .from("posts")
+      .select("author_id")
+      .eq("id", postId)
+      .single();
 
-  static deletePost(postId: string, userId: string): boolean {
-    const state = db.getState();
-    const postIndex = state.posts.findIndex(p => p.id === postId);
-    if (postIndex === -1) throw new Error("Post not found.");
+    if (!post) throw new Error("Post not found.");
 
-    const post = state.posts[postIndex];
-    const user = state.users.find(u => u.id === userId);
+    const { data: user } = await supabaseAdmin
+      .from("users")
+      .select("role")
+      .eq("id", userId)
+      .single();
 
     if (post.author_id !== userId && user?.role !== "ADMIN" && user?.role !== "MODERATOR") {
       throw new Error("You do not have permission to delete this signal.");
     }
 
-    state.posts.splice(postIndex, 1);
-    
-    // Clean up relations
-    state.media = state.media.filter(m => m.post_id !== postId);
-    state.post_likes = state.post_likes.filter(pl => pl.post_id !== postId);
-    state.comments = state.comments.filter(c => c.post_id !== postId);
-    state.bookmarks = state.bookmarks.filter(b => b.post_id !== postId);
-    state.reposts = state.reposts.filter(r => r.post_id !== postId);
+    await supabaseAdmin.from("posts").delete().eq("id", postId);
 
-    const authorProfile = state.profiles.find(p => p.user_id === post.author_id);
-    if (authorProfile) authorProfile.posts_count = Math.max(0, authorProfile.posts_count - 1);
+    // Decrement posts count
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("posts_count")
+      .eq("user_id", post.author_id)
+      .single();
 
-    db.save();
-
-    backgroundQueue.enqueue("AUDIT_LOG_RECORD", {
-      actorId: userId,
-      action: "SIGNAL_DELETE",
-      resourceType: "POST",
-      resourceId: postId,
-    });
+    if (profile && profile.posts_count > 0) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({ posts_count: profile.posts_count - 1 })
+        .eq("user_id", post.author_id);
+    }
 
     return true;
   }
 
-  static toggleLike(postId: string, userId: string): { liked: boolean; like_count: number } {
-    const state = db.getState();
-    const post = state.posts.find(p => p.id === postId);
+  static async toggleLike(
+    postId: string,
+    userId: string
+  ): Promise<{ liked: boolean; like_count: number }> {
+    const { data: post } = await supabaseAdmin
+      .from("posts")
+      .select("author_id, like_count")
+      .eq("id", postId)
+      .single();
+
     if (!post) throw new Error("Signal not found.");
 
-    const existingIndex = state.post_likes.findIndex(
-      pl => pl.post_id === postId && pl.user_id === userId
-    );
+    const { data: existingLike } = await supabaseAdmin
+      .from("post_likes")
+      .select("id")
+      .eq("post_id", postId)
+      .eq("user_id", userId)
+      .single();
 
+    let newCount = post.like_count || 0;
     let liked = false;
-    if (existingIndex > -1) {
-      // Unlike
-      state.post_likes.splice(existingIndex, 1);
-      post.like_count = Math.max(0, post.like_count - 1);
+
+    if (existingLike) {
+      await supabaseAdmin.from("post_likes").delete().eq("id", existingLike.id);
+      newCount = Math.max(0, newCount - 1);
       liked = false;
     } else {
-      // Like
-      state.post_likes.push({
-        id: `plk_${Date.now()}`,
-        post_id: postId,
-        user_id: userId,
-        created_at: new Date().toISOString(),
-      });
-      post.like_count++;
+      await supabaseAdmin.from("post_likes").insert({ post_id: postId, user_id: userId });
+      newCount = newCount + 1;
       liked = true;
 
-      // Dispatch notification if not liking own post
       if (post.author_id !== userId) {
-        backgroundQueue.enqueue("NOTIFICATION_FANOUT", {
-          recipientIds: [post.author_id],
-          actorId: userId,
+        await supabaseAdmin.from("notifications").insert({
+          recipient_id: post.author_id,
+          actor_id: userId,
           type: "LIKE",
-          postId,
+          post_id: postId,
         });
       }
     }
 
-    db.save();
-    return { liked, like_count: post.like_count };
+    await supabaseAdmin.from("posts").update({ like_count: newCount }).eq("id", postId);
+    return { liked, like_count: newCount };
   }
 
-  static toggleBookmark(postId: string, userId: string): { bookmarked: boolean; bookmark_count: number } {
-    const state = db.getState();
-    const post = state.posts.find(p => p.id === postId);
+  static async toggleBookmark(
+    postId: string,
+    userId: string
+  ): Promise<{ bookmarked: boolean; bookmark_count: number }> {
+    const { data: post } = await supabaseAdmin
+      .from("posts")
+      .select("bookmark_count")
+      .eq("id", postId)
+      .single();
+
     if (!post) throw new Error("Signal not found.");
 
-    const existingIndex = state.bookmarks.findIndex(
-      b => b.post_id === postId && b.user_id === userId
-    );
+    const { data: existing } = await supabaseAdmin
+      .from("bookmarks")
+      .select("id")
+      .eq("post_id", postId)
+      .eq("user_id", userId)
+      .single();
 
+    let newCount = post.bookmark_count || 0;
     let bookmarked = false;
-    if (existingIndex > -1) {
-      state.bookmarks.splice(existingIndex, 1);
-      post.bookmark_count = Math.max(0, post.bookmark_count - 1);
+
+    if (existing) {
+      await supabaseAdmin.from("bookmarks").delete().eq("id", existing.id);
+      newCount = Math.max(0, newCount - 1);
       bookmarked = false;
     } else {
-      state.bookmarks.push({
-        id: `bmk_${Date.now()}`,
-        post_id: postId,
-        user_id: userId,
-        created_at: new Date().toISOString(),
-      });
-      post.bookmark_count++;
+      await supabaseAdmin.from("bookmarks").insert({ post_id: postId, user_id: userId });
+      newCount = newCount + 1;
       bookmarked = true;
     }
 
-    db.save();
-    return { bookmarked, bookmark_count: post.bookmark_count };
+    await supabaseAdmin.from("posts").update({ bookmark_count: newCount }).eq("id", postId);
+    return { bookmarked, bookmark_count: newCount };
   }
 
-  static toggleRepost(postId: string, userId: string, quoteContent?: string): { reposted: boolean; repost_count: number } {
-    const state = db.getState();
-    const post = state.posts.find(p => p.id === postId);
+  static async toggleRepost(
+    postId: string,
+    userId: string,
+    quoteContent?: string
+  ): Promise<{ reposted: boolean; repost_count: number }> {
+    const { data: post } = await supabaseAdmin
+      .from("posts")
+      .select("author_id, repost_count")
+      .eq("id", postId)
+      .single();
+
     if (!post) throw new Error("Signal not found.");
 
-    const existingIndex = state.reposts.findIndex(
-      r => r.post_id === postId && r.user_id === userId
-    );
+    const { data: existing } = await supabaseAdmin
+      .from("reposts")
+      .select("id")
+      .eq("post_id", postId)
+      .eq("user_id", userId)
+      .single();
 
+    let newCount = post.repost_count || 0;
     let reposted = false;
-    if (existingIndex > -1 && !quoteContent) {
-      state.reposts.splice(existingIndex, 1);
-      post.repost_count = Math.max(0, post.repost_count - 1);
+
+    if (existing && !quoteContent) {
+      await supabaseAdmin.from("reposts").delete().eq("id", existing.id);
+      newCount = Math.max(0, newCount - 1);
       reposted = false;
     } else {
-      state.reposts.push({
-        id: `rep_${Date.now()}`,
+      await supabaseAdmin.from("reposts").insert({
         post_id: postId,
         user_id: userId,
-        quote_content: quoteContent?.trim(),
-        created_at: new Date().toISOString(),
+        quote_content: quoteContent?.trim() || null,
       });
-      post.repost_count++;
+      newCount = newCount + 1;
       reposted = true;
 
       if (post.author_id !== userId) {
-        backgroundQueue.enqueue("NOTIFICATION_FANOUT", {
-          recipientIds: [post.author_id],
-          actorId: userId,
+        await supabaseAdmin.from("notifications").insert({
+          recipient_id: post.author_id,
+          actor_id: userId,
           type: "REPOST",
-          postId,
+          post_id: postId,
         });
       }
     }
 
-    db.save();
-    return { reposted, repost_count: post.repost_count };
+    await supabaseAdmin.from("posts").update({ repost_count: newCount }).eq("id", postId);
+    return { reposted, repost_count: newCount };
   }
 
-  static getPostComments(postId: string, currentUserId?: string): Comment[] {
-    const state = db.getState();
-    const postComments = state.comments.filter(c => c.post_id === postId);
+  static async getPostComments(postId: string, currentUserId?: string): Promise<Comment[]> {
+    const { data: rows } = await supabaseAdmin
+      .from("comments")
+      .select(`
+        *,
+        author_profile:profiles!comments_author_id_fkey(*),
+        author_user:users!comments_author_id_fkey(username, is_verified)
+      `)
+      .eq("post_id", postId)
+      .order("created_at", { ascending: true });
 
-    const enrichComment = (c: Comment): Comment => {
-      const author = state.users.find(u => u.id === c.author_id);
-      const profile = state.profiles.find(p => p.user_id === c.author_id);
-      const has_liked = currentUserId ? state.comment_likes.some(cl => cl.comment_id === c.id && cl.user_id === currentUserId) : false;
+    if (!rows) return [];
 
+    let likedSet = new Set<string>();
+    if (currentUserId) {
+      const { data: likes } = await supabaseAdmin
+        .from("comment_likes")
+        .select("comment_id")
+        .eq("user_id", currentUserId);
+      likedSet = new Set((likes || []).map((l: any) => l.comment_id));
+    }
+
+    const comments: Comment[] = rows.map((c: any) => {
+      const p = Array.isArray(c.author_profile) ? c.author_profile[0] : c.author_profile;
+      const u = Array.isArray(c.author_user) ? c.author_user[0] : c.author_user;
       return {
-        ...c,
-        author: profile && author ? { ...profile, username: author.username, is_verified: author.is_verified } : undefined,
-        has_liked,
+        id: c.id,
+        post_id: c.post_id,
+        author_id: c.author_id,
+        parent_id: c.parent_id,
+        content: c.content,
+        like_count: c.like_count ?? 0,
+        created_at: c.created_at,
+        updated_at: c.updated_at,
+        author: p ? {
+          ...p,
+          username: u?.username || "user",
+          is_verified: u?.is_verified ?? false,
+        } : undefined,
+        has_liked: likedSet.has(c.id),
       };
-    };
+    });
 
-    // Build hierarchy: root comments with nested replies
-    const rootComments = postComments.filter(c => !c.parent_id).map(enrichComment);
+    const rootComments = comments.filter(c => !c.parent_id);
     for (const root of rootComments) {
-      root.replies = postComments
+      root.replies = comments
         .filter(c => c.parent_id === root.id)
-        .map(enrichComment)
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
 
     return rootComments.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
-  static addComment(postId: string, authorId: string, content: string, parentId?: string): Comment {
-    const state = db.getState();
-    const post = state.posts.find(p => p.id === postId);
-    if (!post) throw new Error("Signal not found.");
-
+  static async addComment(
+    postId: string,
+    authorId: string,
+    content: string,
+    parentId?: string
+  ): Promise<Comment> {
     const cleanContent = content.trim();
     if (!cleanContent) throw new Error("Comment cannot be empty.");
     if (cleanContent.length > 1000) throw new Error("Comment cannot exceed 1,000 characters.");
 
-    const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
+    const { data: post } = await supabaseAdmin
+      .from("posts")
+      .select("author_id, comment_count")
+      .eq("id", postId)
+      .single();
 
-    const newComment: Comment = {
-      id: commentId,
-      post_id: postId,
-      author_id: authorId,
-      parent_id: parentId || null,
-      content: cleanContent,
-      like_count: 0,
-      created_at: now,
-      updated_at: now,
-    };
+    if (!post) throw new Error("Signal not found.");
 
-    state.comments.push(newComment);
-    post.comment_count++;
-    db.save();
+    const { data: newComment, error } = await supabaseAdmin
+      .from("comments")
+      .insert({
+        post_id: postId,
+        author_id: authorId,
+        parent_id: parentId || null,
+        content: cleanContent,
+      })
+      .select(`
+        *,
+        author_profile:profiles!comments_author_id_fkey(*),
+        author_user:users!comments_author_id_fkey(username, is_verified)
+      `)
+      .single();
 
-    // Async AI moderation on comment
-    backgroundQueue.enqueue("AI_MODERATION", {
-      targetType: "COMMENT",
-      targetId: commentId,
-      content: cleanContent,
-    });
+    if (error || !newComment) {
+      throw new Error(`Failed to add comment: ${error?.message}`);
+    }
 
-    // Notify author of post or parent comment
-    const recipientId = parentId 
-      ? state.comments.find(c => c.id === parentId)?.author_id 
-      : post.author_id;
+    // Increment comment count
+    await supabaseAdmin
+      .from("posts")
+      .update({ comment_count: (post.comment_count || 0) + 1 })
+      .eq("id", postId);
 
+    // Notify post author
+    const recipientId = parentId ? undefined : post.author_id;
     if (recipientId && recipientId !== authorId) {
-      backgroundQueue.enqueue("NOTIFICATION_FANOUT", {
-        recipientIds: [recipientId],
-        actorId: authorId,
-        type: parentId ? "REPLY" : "COMMENT",
-        postId,
-        commentId,
+      await supabaseAdmin.from("notifications").insert({
+        recipient_id: recipientId,
+        actor_id: authorId,
+        type: "COMMENT",
+        post_id: postId,
+        comment_id: newComment.id,
       });
     }
 
-    const author = state.users.find(u => u.id === authorId);
-    const profile = state.profiles.find(p => p.user_id === authorId);
+    const p = Array.isArray(newComment.author_profile) ? newComment.author_profile[0] : newComment.author_profile;
+    const u = Array.isArray(newComment.author_user) ? newComment.author_user[0] : newComment.author_user;
 
     return {
-      ...newComment,
-      author: profile && author ? { ...profile, username: author.username, is_verified: author.is_verified } : undefined,
+      id: newComment.id,
+      post_id: newComment.post_id,
+      author_id: newComment.author_id,
+      parent_id: newComment.parent_id,
+      content: newComment.content,
+      like_count: 0,
+      created_at: newComment.created_at,
+      updated_at: newComment.updated_at,
+      author: p ? {
+        ...p,
+        username: u?.username || "user",
+        is_verified: u?.is_verified ?? false,
+      } : undefined,
       has_liked: false,
     };
   }
 
-  static toggleCommentLike(commentId: string, userId: string): { liked: boolean; like_count: number } {
-    const state = db.getState();
-    const comment = state.comments.find(c => c.id === commentId);
+  static async toggleCommentLike(
+    commentId: string,
+    userId: string
+  ): Promise<{ liked: boolean; like_count: number }> {
+    const { data: comment } = await supabaseAdmin
+      .from("comments")
+      .select("like_count")
+      .eq("id", commentId)
+      .single();
+
     if (!comment) throw new Error("Comment not found.");
 
-    const existingIndex = state.comment_likes.findIndex(
-      cl => cl.comment_id === commentId && cl.user_id === userId
-    );
+    const { data: existing } = await supabaseAdmin
+      .from("comment_likes")
+      .select("id")
+      .eq("comment_id", commentId)
+      .eq("user_id", userId)
+      .single();
 
+    let newCount = comment.like_count || 0;
     let liked = false;
-    if (existingIndex > -1) {
-      state.comment_likes.splice(existingIndex, 1);
-      comment.like_count = Math.max(0, comment.like_count - 1);
+
+    if (existing) {
+      await supabaseAdmin.from("comment_likes").delete().eq("id", existing.id);
+      newCount = Math.max(0, newCount - 1);
       liked = false;
     } else {
-      state.comment_likes.push({
-        id: `cmlk_${Date.now()}`,
-        comment_id: commentId,
-        user_id: userId,
-        created_at: new Date().toISOString(),
-      });
-      comment.like_count++;
+      await supabaseAdmin.from("comment_likes").insert({ comment_id: commentId, user_id: userId });
+      newCount = newCount + 1;
       liked = true;
     }
 
-    db.save();
-    return { liked, like_count: comment.like_count };
-  }
-
-  public static enrichPost(post: Post, currentUserId?: string): Post {
-    const state = db.getState();
-    const author = state.users.find(u => u.id === post.author_id);
-    const profile = state.profiles.find(p => p.user_id === post.author_id);
-    const circle = post.circle_id ? state.circles.find(c => c.id === post.circle_id) : undefined;
-    const media = state.media.filter(m => m.post_id === post.id);
-
-    let has_liked = false;
-    let has_bookmarked = false;
-    let has_reposted = false;
-
-    if (currentUserId) {
-      has_liked = state.post_likes.some(pl => pl.post_id === post.id && pl.user_id === currentUserId);
-      has_bookmarked = state.bookmarks.some(b => b.post_id === post.id && b.user_id === currentUserId);
-      has_reposted = state.reposts.some(r => r.post_id === post.id && r.user_id === currentUserId);
-    }
-
-    return {
-      ...post,
-      author: profile && author ? { ...profile, username: author.username, is_verified: author.is_verified, role: author.role } : undefined,
-      circle,
-      media,
-      has_liked,
-      has_bookmarked,
-      has_reposted,
-    };
+    await supabaseAdmin.from("comments").update({ like_count: newCount }).eq("id", commentId);
+    return { liked, like_count: newCount };
   }
 }

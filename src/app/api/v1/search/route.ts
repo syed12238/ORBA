@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     const currentUserId = req.headers.get("x-user-id") || req.nextUrl.searchParams.get("userId") || undefined;
     const limit = parseInt(req.nextUrl.searchParams.get("limit") || "20", 10);
 
-    const results = SearchService.search(query, currentUserId, limit);
+    const results = await SearchService.search(query, currentUserId, limit);
     return successResponse(results);
   } catch (err: any) {
     return errorResponse("SEARCH_ERROR", err.message, 500);

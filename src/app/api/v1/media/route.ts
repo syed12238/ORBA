@@ -1,10 +1,20 @@
 import { NextRequest } from "next/server";
 import { storageService } from "@/server/storage";
 import { successResponse, errorResponse } from "@/lib/api-response";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const userId = req.headers.get("x-user-id");
+    let userId = req.headers.get("x-user-id");
+
+    if (!userId) {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) userId = user.id;
+      } catch {}
+    }
+
     if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required to upload media", 401);
 
     const formData = await req.formData();

@@ -8,7 +8,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const userId = req.headers.get("x-user-id") || body.userId;
     if (!userId) return errorResponse("UNAUTHORIZED", "Authentication required", 401);
 
-    const result = PostService.toggleRepost(params.id, userId, body.quoteContent);
+    const result = await PostService.toggleRepost(params.id, userId, body.quoteContent);
     return successResponse(result);
   } catch (err: any) {
     return errorResponse("REPOST_ERROR", err.message, 400);

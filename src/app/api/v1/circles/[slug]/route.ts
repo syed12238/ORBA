@@ -6,10 +6,10 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 export async function GET(req: NextRequest, { params }: { params: { slug: string } }) {
   try {
     const currentUserId = req.headers.get("x-user-id") || req.nextUrl.searchParams.get("userId") || undefined;
-    const circle = CircleService.getCircleBySlug(params.slug, currentUserId);
+    const circle = await CircleService.getCircleBySlug(params.slug, currentUserId);
     if (!circle) return errorResponse("CIRCLE_NOT_FOUND", "Circle not found", 404);
 
-    const members = CircleService.getMembers(circle.id);
+    const members = await CircleService.getMembers(circle.id);
     const feed = await FeedService.getCircleFeed(circle.id, currentUserId);
 
     return successResponse({
