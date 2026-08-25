@@ -116,26 +116,31 @@ function LoginContent() {
   };
 
   return (
-    <div className="min-h-[85vh] flex items-center justify-center p-4">
-      <div className="w-full max-w-md p-8 rounded-3xl bg-surface-card border border-surface-borderLight shadow-2xl backdrop-blur-2xl flex flex-col gap-6 relative overflow-hidden animate-scale-in">
+    <div className="min-h-[85vh] flex items-center justify-center p-4 dot-grid-bg relative">
+      {/* Page-level ambient glows */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-orba-500/5 blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-accent-cyan/4 blur-[120px] pointer-events-none" />
+      <div className="w-full max-w-md p-8 rounded-3xl glass-card shadow-glass-elevated flex flex-col gap-6 relative overflow-hidden animate-scale-in">
         {/* Glow ambient background accents */}
-        <div className="absolute -top-24 -right-24 w-52 h-52 rounded-full bg-orba-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-52 h-52 rounded-full bg-accent-cyan/10 blur-3xl pointer-events-none" />
+        <div className="absolute -top-24 -right-24 w-52 h-52 rounded-full bg-orba-500/8 blur-3xl pointer-events-none animate-pulse-glow" />
+        <div className="absolute -bottom-24 -left-24 w-52 h-52 rounded-full bg-accent-cyan/8 blur-3xl pointer-events-none animate-pulse-glow" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-accent-purple/4 blur-[80px] pointer-events-none" />
 
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center gap-3 relative z-10">
-          <div className="relative flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-orba-600 via-orba-500 to-accent-cyan p-0.5 shadow-xl shadow-orba-500/25">
+          <div className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-orba-600 via-orba-500 to-accent-cyan p-0.5 shadow-glow-orba animate-float">
             <div className="w-full h-full bg-obsidian rounded-[14px] flex items-center justify-center relative overflow-hidden">
-              <div className="absolute inset-0 rounded-full border border-orba-400/40 animate-orbit-slow" />
-              <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-orba-400 to-accent-cyan shadow-md shadow-accent-cyan/50" />
+              <div className="absolute inset-0 rounded-full border border-orba-400/30 animate-orbit-slow" />
+              <div className="absolute inset-2 rounded-full border border-accent-cyan/15 animate-orbit-medium" />
+              <div className="w-4.5 h-4.5 rounded-full bg-gradient-to-tr from-orba-400 to-accent-cyan shadow-md shadow-accent-cyan/40 animate-glow-pulse" />
             </div>
           </div>
 
           <div className="flex flex-col">
-            <h1 className="text-2xl font-bold tracking-tight text-white font-sans">
-              Enter ORBA
+            <h1 className="text-2xl font-extrabold tracking-tight font-sans">
+              <span className="text-gradient-orba">Enter ORBA</span>
             </h1>
-            <p className="text-xs text-zinc-400 mt-1 max-w-xs leading-relaxed">
+            <p className="text-xs text-zinc-400 mt-1.5 max-w-xs leading-relaxed">
               Real-time social discourse, deterministic feeds, and community circles.
             </p>
           </div>
@@ -150,14 +155,14 @@ function LoginContent() {
         )}
 
         {/* Mode Selector Tabs */}
-        <div className="grid grid-cols-2 gap-1 p-1 bg-surface-elevated rounded-xl border border-surface-borderLight text-xs font-semibold">
+        <div className="grid grid-cols-2 gap-1 p-1 bg-surface-elevated/80 rounded-xl border border-surface-borderLight/50 text-xs font-semibold">
           <button
             type="button"
             onClick={() => setActiveTab("google")}
-            className={`py-2 px-3 rounded-lg transition-all text-center cursor-pointer ${
+            className={`py-2.5 px-3 rounded-lg transition-all duration-200 text-center cursor-pointer ${
               activeTab === "google"
-                ? "bg-orba-600 text-white shadow-sm font-bold"
-                : "text-zinc-400 hover:text-white"
+                ? "bg-gradient-to-r from-orba-600 to-orba-500 text-white shadow-sm font-bold"
+                : "text-zinc-500 hover:text-white"
             }`}
           >
             Google Sign-In
@@ -165,10 +170,10 @@ function LoginContent() {
           <button
             type="button"
             onClick={() => setActiveTab("guest")}
-            className={`py-2 px-3 rounded-lg transition-all text-center cursor-pointer ${
+            className={`py-2.5 px-3 rounded-lg transition-all duration-200 text-center cursor-pointer ${
               activeTab === "guest"
-                ? "bg-orba-600 text-white shadow-sm font-bold"
-                : "text-zinc-400 hover:text-white"
+                ? "bg-gradient-to-r from-orba-600 to-orba-500 text-white shadow-sm font-bold"
+                : "text-zinc-500 hover:text-white"
             }`}
           >
             Create Handle
@@ -182,7 +187,7 @@ function LoginContent() {
               type="button"
               onClick={handleGoogleSignIn}
               disabled={isAuthenticating}
-              className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-2xl bg-white hover:bg-zinc-100 active:scale-[0.99] text-zinc-900 font-semibold text-sm shadow-xl shadow-black/40 border border-zinc-200 transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed group cursor-pointer"
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-2xl bg-white hover:bg-zinc-50 active:scale-[0.98] text-zinc-900 font-bold text-sm shadow-glass-elevated border border-zinc-200/80 transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed group cursor-pointer"
             >
               {isAuthenticating ? (
                 <>

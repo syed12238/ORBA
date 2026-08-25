@@ -32,19 +32,20 @@ export function Sidebar() {
 
   return (
     <>
-      <aside className="hidden md:flex flex-col justify-between w-20 lg:w-64 xl:w-72 h-screen sticky top-0 px-2 lg:px-4 py-6 border-r border-surface-borderLight bg-obsidian/95 backdrop-blur-xl select-none z-30">
+      <aside className="hidden md:flex flex-col justify-between w-20 lg:w-64 xl:w-72 h-screen sticky top-0 px-2 lg:px-4 py-6 border-r border-surface-borderLight/50 bg-obsidian/95 backdrop-blur-xl select-none z-30 bg-gradient-mesh">
         <div className="flex flex-col gap-6">
           {/* Brand Header */}
           <Link href="/" className="flex items-center gap-3 px-2 lg:px-3 py-1 group">
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-orba-600 via-orba-500 to-accent-cyan p-0.5 shadow-lg shadow-orba-500/20 group-hover:scale-105 transition-transform duration-300">
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-orba-600 via-orba-500 to-accent-cyan p-0.5 shadow-glow-orba group-hover:scale-105 transition-transform duration-300">
               <div className="w-full h-full bg-obsidian rounded-[10px] flex items-center justify-center relative overflow-hidden">
-                <div className="absolute inset-0 rounded-full border border-orba-400/40 animate-orbit-slow" />
-                <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-orba-400 to-accent-cyan shadow-sm shadow-accent-cyan/50" />
+                <div className="absolute inset-0 rounded-full border border-orba-400/30 animate-orbit-slow" />
+                <div className="absolute inset-2 rounded-full border border-accent-cyan/15 animate-orbit-medium" />
+                <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-orba-400 to-accent-cyan shadow-md shadow-accent-cyan/40 animate-glow-pulse" />
               </div>
             </div>
             <div className="hidden lg:flex flex-col">
               <span className="font-bold text-lg tracking-tight text-white flex items-center gap-1.5 font-sans">
-                ORBA
+                <span className="text-gradient-orba">ORBA</span>
               </span>
               <span className="text-[11px] text-zinc-400 font-medium tracking-wide">
                 Where conversations orbit
@@ -72,10 +73,10 @@ export function Sidebar() {
                 <Link
                   key={item.label}
                   href={href}
-                  className={`relative flex items-center justify-center lg:justify-between px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-150 group ${
+                  className={`relative flex items-center justify-center lg:justify-between px-3 py-2.5 rounded-xl font-medium text-xs transition-all duration-200 group ${
                     isActive
-                      ? "bg-surface-elevated text-white shadow-sm border border-surface-borderLight"
-                      : "text-zinc-400 hover:text-zinc-100 hover:bg-surface-hover/70"
+                      ? "bg-gradient-to-r from-surface-elevated to-surface-card text-white shadow-glass-subtle border border-surface-borderLight/80"
+                      : "text-zinc-500 hover:text-zinc-100 hover:bg-surface-hover/50"
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -120,7 +121,7 @@ export function Sidebar() {
           {/* Emit Signal CTA Button */}
           <button
             onClick={handleEmitClick}
-            className="flex items-center justify-center gap-2 w-full py-3 px-3 rounded-xl bg-gradient-to-r from-orba-600 to-orba-500 hover:from-orba-500 hover:to-orba-400 text-white font-semibold text-xs shadow-lg shadow-orba-500/25 hover:shadow-orba-500/40 active:scale-[0.98] transition-all duration-150 cursor-pointer"
+            className="flex items-center justify-center gap-2 w-full py-3 px-3 rounded-xl bg-gradient-to-r from-orba-600 via-orba-500 to-accent-purple/80 hover:from-orba-500 hover:via-orba-400 hover:to-accent-purple/70 text-white font-semibold text-xs shadow-glow-orba hover:shadow-[0_0_32px_-6px_rgba(99,102,241,0.5)] active:scale-[0.97] transition-all duration-200 cursor-pointer btn-glow"
           >
             <PlusCircle className="w-4 h-4" />
             <span className="hidden lg:inline">{user ? "Emit Signal" : "Sign In to Post"}</span>

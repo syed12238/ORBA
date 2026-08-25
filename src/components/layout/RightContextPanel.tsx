@@ -65,7 +65,7 @@ export function RightContextPanel() {
   };
 
   return (
-    <aside className="hidden lg:flex flex-col gap-5 w-80 xl:w-88 h-screen sticky top-0 px-4 py-6 border-l border-surface-borderLight bg-obsidian/90 backdrop-blur-xl overflow-y-auto select-none z-20">
+    <aside className="hidden lg:flex flex-col gap-5 w-80 xl:w-88 h-screen sticky top-0 px-4 py-6 border-l border-surface-borderLight/40 bg-obsidian/90 backdrop-blur-2xl overflow-y-auto select-none z-20 bg-gradient-mesh">
       {/* Search Input */}
       <form onSubmit={handleSearchSubmit} className="relative group">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-orba-400 transition-colors pointer-events-none" />
@@ -74,7 +74,7 @@ export function RightContextPanel() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search signals, people, circles..."
-          className="w-full pl-10 pr-8 py-2.5 rounded-xl bg-surface-card border border-surface-borderLight text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orba-500 focus:ring-1 focus:ring-orba-500/40 transition-all shadow-inner"
+          className="w-full pl-10 pr-8 py-2.5 rounded-xl bg-surface-card/80 border border-surface-borderLight/50 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orba-500 focus:ring-1 focus:ring-orba-500/30 transition-all shadow-inner-highlight"
         />
         {searchQuery && (
           <button
@@ -88,7 +88,7 @@ export function RightContextPanel() {
       </form>
 
       {/* Suggested People to Follow */}
-      <div className="p-4 rounded-2xl bg-surface-card border border-surface-borderLight flex flex-col gap-3">
+      <div className="p-4 rounded-2xl glass-card flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5 font-mono">
             <Sparkles className="w-3.5 h-3.5 text-orba-400" />
@@ -133,10 +133,10 @@ export function RightContextPanel() {
 
                   <button
                     onClick={() => handleFollowToggle(su.username, su.user_id)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer ${
                       isFollowed
-                        ? "bg-surface-elevated text-zinc-300 border border-surface-border hover:bg-rose-950/40 hover:text-rose-300"
-                        : "bg-orba-600/25 hover:bg-orba-600 text-orba-200 hover:text-white border border-orba-500/40 font-semibold"
+                        ? "bg-surface-elevated text-zinc-400 border border-surface-border hover:bg-rose-950/30 hover:text-rose-300 hover:border-rose-800/30"
+                        : "bg-orba-600/20 hover:bg-orba-600 text-orba-300 hover:text-white border border-orba-500/30 font-semibold btn-glow"
                     }`}
                   >
                     {isFollowed ? "Following" : "Follow"}
@@ -153,7 +153,7 @@ export function RightContextPanel() {
       </div>
 
       {/* Trending Topics */}
-      <div className="p-4 rounded-2xl bg-surface-card border border-surface-borderLight flex flex-col gap-3">
+      <div className="p-4 rounded-2xl glass-card flex flex-col gap-3">
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5 font-mono">
           <TrendingUp className="w-3.5 h-3.5 text-accent-cyan" />
           Trending Topics
@@ -165,7 +165,7 @@ export function RightContextPanel() {
               <Link
                 key={tag.tag}
                 href={`/explore?q=%23${tag.tag}`}
-                className="flex flex-col p-2 rounded-xl hover:bg-surface-hover/70 transition-colors group"
+                className="flex flex-col p-2.5 rounded-xl hover:bg-surface-hover/50 transition-all duration-200 group"
               >
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-white group-hover:text-accent-cyan transition-colors">

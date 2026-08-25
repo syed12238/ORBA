@@ -259,7 +259,7 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
 
   return (
     <article
-      className={`p-5 rounded-2xl bg-surface-card border border-surface-borderLight hover:border-surface-border transition-all duration-150 shadow-sm relative group ${className}`}
+      className={`p-5 rounded-2xl bg-gradient-to-br from-surface-card via-surface-card to-surface-subtle border border-surface-borderLight/70 hover:border-orba-500/20 transition-all duration-300 shadow-glass-card hover:shadow-glass-elevated relative group card-shine gradient-border ${className}`}
     >
       {/* Circle Indicator if attached to Circle */}
       {post.circle && (
@@ -374,7 +374,7 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
 
       {/* Media Attachments Gallery */}
       {post.media && Array.isArray(post.media) && post.media.length > 0 && (
-        <div className="mt-3 rounded-xl overflow-hidden border border-surface-border bg-obsidian">
+        <div className="mt-3 rounded-xl overflow-hidden border border-surface-border/60 bg-obsidian shadow-inner-highlight">
           {post.media.map((m, idx) => (
             <div key={m.id || m.url || idx} className="relative aspect-video max-h-96 w-full">
               <img
@@ -392,14 +392,14 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
       )}
 
       {/* Tactical Interaction Bar */}
-      <div className="mt-4 pt-3 border-t border-surface-border/60 flex items-center justify-between text-zinc-400 text-xs select-none">
+      <div className="mt-4 pt-3 border-t border-surface-border/40 flex items-center justify-between text-zinc-500 text-xs select-none">
         {/* Comment */}
         <button
           onClick={() => setIsCommentsOpen(!isCommentsOpen)}
-          className={`flex items-center gap-1.5 py-1 px-2 rounded-lg transition-colors group ${
+          className={`flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl transition-all duration-200 group interaction-btn ${
             isCommentsOpen
               ? "text-orba-400 bg-orba-500/10"
-              : "hover:text-orba-400 hover:bg-surface-hover"
+              : "hover:text-orba-400 hover:bg-orba-500/5"
           }`}
           aria-label="Comments"
         >
@@ -410,10 +410,10 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
         {/* Repost */}
         <button
           onClick={handleRepost}
-          className={`flex items-center gap-1.5 py-1 px-2 rounded-lg transition-colors group ${
+          className={`flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl transition-all duration-200 group interaction-btn ${
             post.has_reposted
               ? "text-emerald-400 font-semibold"
-              : "hover:text-emerald-400 hover:bg-surface-hover"
+              : "hover:text-emerald-400 hover:bg-emerald-500/5"
           }`}
           aria-label="Repost"
         >
@@ -424,10 +424,10 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
         {/* Like */}
         <button
           onClick={handleLike}
-          className={`flex items-center gap-1.5 py-1 px-2 rounded-lg transition-colors group ${
+          className={`flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl transition-all duration-200 group interaction-btn ${
             post.has_liked
               ? "text-rose-400 font-semibold"
-              : "hover:text-rose-400 hover:bg-surface-hover"
+              : "hover:text-rose-400 hover:bg-rose-500/5"
           }`}
           aria-label="Like"
         >
@@ -442,10 +442,10 @@ export function SignalCard({ post: initialPost, onPostDeleted, className = "" }:
         {/* Bookmark */}
         <button
           onClick={handleBookmark}
-          className={`flex items-center gap-1.5 py-1 px-2 rounded-lg transition-colors group ${
+          className={`flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl transition-all duration-200 group interaction-btn ${
             post.has_bookmarked
-              ? "text-accent-amber font-semibold text-amber-400"
-              : "hover:text-amber-400 hover:bg-surface-hover"
+              ? "text-amber-400 font-semibold"
+              : "hover:text-amber-400 hover:bg-amber-500/5"
           }`}
           aria-label="Bookmark"
         >

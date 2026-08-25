@@ -77,7 +77,7 @@ export function FeedList() {
   return (
     <div className="flex flex-col w-full max-w-2xl mx-auto pb-24 md:pb-12">
       {/* Sticky Feed Filter Bar */}
-      <div className="sticky top-0 md:top-0 bg-obsidian/90 backdrop-blur-xl border-b border-surface-borderLight flex items-center justify-between px-4 py-1 z-10 select-none">
+      <div className="sticky top-0 md:top-0 bg-obsidian/80 backdrop-blur-2xl border-b border-surface-borderLight/40 flex items-center justify-between px-4 py-1 z-10 select-none">
         <Tabs
           tabs={tabs}
           activeTab={activeTab}
@@ -87,7 +87,7 @@ export function FeedList() {
 
       {/* Authenticated Composer OR Visitor CTA Card */}
       {user ? (
-        <div className="p-4 mx-4 my-4 rounded-2xl bg-surface-card border border-surface-borderLight shadow-sm flex items-center gap-3">
+        <div className="p-4 mx-4 my-4 rounded-2xl bg-gradient-to-br from-surface-card via-surface-card to-surface-subtle border border-surface-borderLight/60 shadow-glass-card flex items-center gap-3 gradient-border">
           <Avatar
             src={profile?.avatar_url}
             alt={profile?.display_name || user.username}
@@ -95,34 +95,37 @@ export function FeedList() {
           />
           <button
             onClick={() => setIsModalCreateOpen(true)}
-            className="flex-1 text-left px-4 py-3 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border text-xs text-zinc-400 hover:text-zinc-200 transition-colors flex items-center justify-between group cursor-pointer"
+            className="flex-1 text-left px-4 py-3 rounded-xl bg-surface-elevated/80 hover:bg-surface-hover border border-surface-border/60 text-xs text-zinc-500 hover:text-zinc-300 transition-all duration-200 flex items-center justify-between group cursor-pointer"
           >
-            <span>What's orbiting your mind? (Supports #hashtags and @mentions)</span>
-            <Plus className="w-4 h-4 text-orba-400 group-hover:scale-110 transition-transform" />
+            <span>What&apos;s orbiting your mind?</span>
+            <Plus className="w-4 h-4 text-orba-400 group-hover:scale-110 group-hover:rotate-90 transition-transform duration-300" />
           </button>
         </div>
       ) : (
-        <div className="mx-4 my-4 p-5 rounded-2xl bg-gradient-to-br from-surface-card via-[#0e1322] to-surface-card border border-surface-borderLight shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex flex-col gap-1 max-w-md">
-            <span className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5 font-sans">
+        <div className="mx-4 my-4 p-5 rounded-2xl bg-gradient-to-br from-surface-card via-[#0e1322] to-surface-card border border-surface-borderLight/50 shadow-glass-elevated relative overflow-hidden flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          {/* Ambient background glow */}
+          <div className="absolute -top-16 -right-16 w-40 h-40 rounded-full bg-orba-500/8 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-12 -left-12 w-32 h-32 rounded-full bg-accent-cyan/6 blur-3xl pointer-events-none" />
+          <div className="flex flex-col gap-1.5 max-w-md relative z-10">
+            <span className="text-sm font-bold text-white tracking-tight flex items-center gap-2 font-sans">
               <Sparkles className="w-4 h-4 text-orba-400" />
-              Join the conversation on ORBA
+              Join the ORBA Network
             </span>
             <p className="text-[11px] text-zinc-400 leading-relaxed">
-              Sign in with Google or continue as a guest to publish signals, follow researchers, and join circles.
+              Sign in to publish signals, follow researchers, and join community circles.
             </p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto relative z-10">
             <Link
               href="/login"
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-orba-600 hover:bg-orba-500 text-white text-xs font-semibold shadow-lg shadow-orba-500/20 transition-all cursor-pointer whitespace-nowrap"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-orba-600 to-orba-500 hover:from-orba-500 hover:to-orba-400 text-white text-xs font-bold shadow-glow-orba transition-all duration-200 cursor-pointer whitespace-nowrap btn-glow"
             >
               <LogIn className="w-3.5 h-3.5" />
               <span>Sign In</span>
             </Link>
             <Link
               href="/login?tab=guest"
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface-elevated hover:bg-surface-hover border border-surface-border text-zinc-300 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-surface-elevated/80 hover:bg-surface-hover border border-surface-border/60 text-zinc-300 text-xs font-medium transition-all duration-200 cursor-pointer whitespace-nowrap"
             >
               <Compass className="w-3.5 h-3.5 text-zinc-400" />
               <span>Guest</span>
